@@ -9,15 +9,12 @@ import re
 
 from ngi_pipeline.database import classes as db
 from ngi_pipeline.utils.classes import memoized
-    
 from taca.utils.config import CONFIG
 from taca.utils.filesystem import create_folder
 from taca.utils.misc import hashfile
 from taca.utils import transfer
 
-from taca_ngi_pipeline.utils import getLogger
-
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class DelivererError(Exception): pass
 class DelivererDatabaseError(DelivererError): pass
@@ -130,34 +127,26 @@ class Deliverer(object):
                 destination path and the checksum of the source file 
                 (or None if source is a folder)
         """
-        def get_hash(sourcepath,destpath):
-            hash = None
-            checksumpath = "{}.{}".format(sourcepath,self.hash_algorithm)
-            if not os.path.exists(checksumpath):
-                if not self.no_checksum:
-                    hash = hashfile(sourcepath,hasher=self.hash_algorithm)
-                    with open(checksumpath,'w') as fh:
-                        fh.write(hash)
-            else:
-                with open(checksumpath,'r') as fh:
-                    hash = fh.next()
-            return (sourcepath,destpath,hash)
-                    
         for sfile, dfile in getattr(self,'files_to_deliver',[]):
+            dest_path = self.expand_path(dfile)
             for f in glob.iglob(self.expand_path(sfile)):
                 if (os.path.isdir(f)):
+                    fparent = os.path.dirname(f)
                     # walk over all folders and files below
                     for pdir,_,files in os.walk(f):
                         for current in files:
                             fpath = os.path.join(pdir,current)
                             # use the relative path for the destination path
-                            fname = os.path.relpath(fpath,f)
-                            yield get_hash(fpath,
-                                os.path.join(self.expand_path(dfile),fname))
+                            fname = os.path.relpath(fpath,fparent)
+                            yield(fpath,
+                                os.path.join(dest_path,fname),
+                                hashfile(fpath,hasher=self.hash_algorithm) \
+                                if not self.no_checksum else None)
                 else:
-                    yield get_hash(f, 
-                        os.path.join(
-                            self.expand_path(dfile),os.path.basename(f)))
+                    yield (f, 
+                        os.path.join(dest_path,os.path.basename(f)), 
+                        hashfile(f,hasher=self.hash_algorithm) \
+                        if not self.no_checksum else None)
     
     def stage_delivery(self):
         """ Stage a delivery by symlinking source paths to destination paths 
@@ -342,10 +331,6 @@ class SampleDeliverer(Deliverer):
         if sampleentry.get('delivery_status') == 'DELIVERED' and not self.force:
             logger.info("{} has already been delivered".format(str(self)))
             return True
-        elif sampleentry.get('delivery_status') == 'DELIVERING' \
-            and not self.force:
-            logger.info("delivery of {} is already in progress".format(str(self)))
-            return False
         elif sampleentry.get('analysis_status') != 'ANALYZED' and not self.force:
             logger.info("{} has not finished analysis and will not be "\
                 "delivered".format(str(self)))

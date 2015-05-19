@@ -3,10 +3,9 @@
 import click
 import logging
 from taca.utils.misc import send_mail
-from taca_ngi_pipeline.deliver import deliver as _deliver
-from taca_ngi_pipeline.utils import getLogger
+from taca.deliver import deliver as _deliver
 
-logger = getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 @click.group()
 @click.pass_context
@@ -36,19 +35,18 @@ def deliver(ctx,deliverypath,stagingpath,uppnexid,operator,stage_only,force):
         del ctx.params['operator']
     
 # deliver subcommands
-
+        
 ## project delivery
 @deliver.command()
 @click.pass_context
-@click.argument('projectid',type=click.STRING,nargs=-1)
+@click.argument('projectid',type=click.STRING,nargs=1)
 def project(ctx, projectid):
-    """ Deliver the specified projects to the specified destination
+    """ Deliver the specified project to the specified destination
     """
-    for pid in projectid:
-        d = _deliver.ProjectDeliverer(
-            pid,
-            **ctx.parent.params)
-        _exec_delivery(d,d.deliver_project)
+    d = _deliver.ProjectDeliverer(
+        projectid,
+        **ctx.parent.params)
+    _exec_delivery(d,d.deliver_project)
     
 ## sample delivery
 @deliver.command()
@@ -86,7 +84,7 @@ def _exec_delivery(deliver_obj,deliver_fn):
                         str(deliver_fn),
                         str(e)
                     ),
-                recipient=d.config.get('operator'))
+                receiver=deliver_obj.config.get('operator'))
         except Exception as me:
             logger.error(
                 "delivering {} failed - reason: {}, but operator {} could not "\
