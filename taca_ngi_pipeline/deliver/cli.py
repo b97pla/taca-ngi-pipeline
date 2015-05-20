@@ -3,7 +3,7 @@
 import click
 import logging
 from taca.utils.misc import send_mail
-from taca.deliver import deliver as _deliver
+from taca_ngi_pipeline.deliver import deliver as _deliver
 
 logger = logging.getLogger(__name__)
 
