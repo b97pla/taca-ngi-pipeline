@@ -6,6 +6,7 @@ import glob
 import logging
 import os
 import re
+import signal
 
 from ngi_pipeline.database import classes as db
 from ngi_pipeline.utils.classes import memoized
@@ -18,8 +19,17 @@ logger = logging.getLogger(__name__)
 
 class DelivererError(Exception): pass
 class DelivererDatabaseError(DelivererError): pass
+class DelivererInterruptedError(DelivererError): pass
 class DelivererReplaceError(DelivererError): pass
 class DelivererRsyncError(DelivererError): pass
+
+def _signal_handler(signal, frame):
+    """ A custom signal handler which will raise a DelivererInterruptedError
+        :raises DelivererInterruptedError: 
+            this exception will be raised
+    """
+    raise DelivererInterruptedError(
+        "interrupt signal {} received while delivering".format(signal))
 
 class Deliverer(object):
     """ 
@@ -51,6 +61,9 @@ class Deliverer(object):
                 self,'uppnexid',self.project_entry()['uppnex_id'])
         except KeyError:
             pass
+        # set a custom signal handler to intercept interruptions
+        signal.signal(signal.SIGINT,_signal_handler)
+        signal.signal(signal.SIGTERM,_signal_handler)
 
     def __str__(self):
         return "{}:{}".format(
@@ -142,7 +155,10 @@ class Deliverer(object):
             
         for sfile, dfile in getattr(self,'files_to_deliver',[]):
             dest_path = self.expand_path(dfile)
-            for f in glob.iglob(self.expand_path(sfile)):
+            src_path = self.expand_path(sfile)
+            matches = 0
+            for f in glob.iglob(src_path):
+                matches += 1
                 if (os.path.isdir(f)):
                     fparent = os.path.dirname(f)
                     # walk over all folders and files below
@@ -155,7 +171,10 @@ class Deliverer(object):
                 else:
                     yield get_hash(f,
                         os.path.join(dest_path,os.path.basename(f)))
-    
+            if matches == 0:
+                logger.warning("no files matching search expression '{}' "\
+                    "found ".format(src_path))
+
     def stage_delivery(self):
         """ Stage a delivery by symlinking source paths to destination paths 
             according to the returned tuples from the gather_files function. 
@@ -271,25 +290,42 @@ class ProjectDeliverer(Deliverer):
             :returns: True if all samples were delivered successfully, False if
                 any sample was not properly delivered or ready to be delivered
         """
-        logger.info("Delivering {} to {}".format(str(self),self.deliverypath))
         try:
-            sampleentries = self.project_sample_entries()
-        except DelivererDatabaseError as e:
-            logger.error("error '{}' occurred during delivery of {}"
-                         .format(str(e), str(self)))
-            raise
-        # right now, don't catch any errors since we're assuming any thrown 
-        # errors needs to be handled by manual intervention
-        status = True
-        for sampleentry in sampleentries.get('samples',[]):
-            st = SampleDeliverer(
-                self.projectid,sampleentry.get('sampleid')
-            ).deliver_sample(sampleentry)
-            status = (status and st)
+            logger.info("Delivering {} to {}".format(
+                str(self),self.expand_path(self.deliverypath)))
+            projectentry = self.project_entry()
+            if projectentry.get('delivery_status') == 'DELIVERED' \
+                and not self.force:
+                logger.info("{} has already been delivered".format(str(self)))
+                return True
+            try:
+                sampleentries = self.project_sample_entries()
+            except DelivererDatabaseError as e:
+                logger.error("error '{}' occurred during delivery of {}".format(
+                    str(e), str(self)))
+                raise
+            # right now, don't catch any errors since we're assuming any thrown 
+            # errors needs to be handled by manual intervention
+            self.update_delivery_status(status="IN_PROGRESS")
+            status = True
+            for sampleentry in sampleentries.get('samples',[]):
+                st = SampleDeliverer(
+                    self.projectid,sampleentry.get('sampleid')
+                ).deliver_sample(sampleentry)
+                status = (status and st)
             
-        if status:
-            self.update_delivery_status()
-        return status
+            if status:
+                self.update_delivery_status(status="DELIVERED")
+            else:
+                self.update_delivery_status(status="NOT DELIVERED")
+            return status
+        except DelivererInterruptedError as e:
+            self.update_delivery_status(status="NOT DELIVERED")
+            raise
+        except Exception as e:
+            self.update_delivery_status(status="FAILED")
+            raise
+            
 
     def update_delivery_status(self, status="DELIVERED"):
         """ Update the delivery_status field in the database to the supplied 
@@ -328,39 +364,48 @@ class SampleDeliverer(Deliverer):
                 has taken place but should be replaced
             :raises DelivererError: if the delivery failed
         """
-        logger.info("Delivering {} to {}".format(str(self), self.deliverypath))
         try:
-            sampleentry = sampleentry or self.sample_entry()
-        except DelivererDatabaseError as e:
-            logger.error(
-                "error '{}' occurred during delivery of {}".format(
-                    str(e),str(self)))
+            logger.info("Delivering {} to {}".format(
+                str(self),self.expand_path(self.deliverypath)))
+            try:
+                sampleentry = sampleentry or self.sample_entry()
+            except DelivererDatabaseError as e:
+                logger.error(
+                    "error '{}' occurred during delivery of {}".format(
+                        str(e),str(self)))
+                raise
+            if sampleentry.get('delivery_status') == 'DELIVERED' and not self.force:
+                logger.info("{} has already been delivered".format(str(self)))
+                return True
+            elif sampleentry.get('delivery_status') == 'IN_PROGRESS' \
+                and not self.force:
+                logger.info("delivery of {} is already in progress".format(
+                    str(self)))
+                return False
+            elif sampleentry.get('analysis_status') != 'ANALYZED' \
+                and not self.force:
+                logger.info("{} has not finished analysis and will not be "\
+                    "delivered".format(str(self)))
+                return False
+            else:
+                # Propagate raised errors upwards, they should trigger 
+                # notification to operator
+                self.update_delivery_status(status="IN_PROGRESS")
+                if not self.stage_delivery():
+                    raise DelivererError("sample was not properly staged")
+                logger.info("{} successfully staged".format(str(self)))
+                if not self.stage_only:
+                    if not self.do_delivery():
+                        raise DelivererError("sample was not properly delivered")
+                    logger.info("{} successfully delivered".format(str(self)))
+                    self.update_delivery_status()
+                return True
+        except DelivererInterruptedError as e:
+            self.update_delivery_status(status="NOT DELIVERED")
             raise
-        if sampleentry.get('delivery_status') == 'DELIVERED' and not self.force:
-            logger.info("{} has already been delivered".format(str(self)))
-            return True
-        elif sampleentry.get('delivery_status') == 'IN_PROGRESS' \
-            and not self.force:
-            logger.info("delivery of {} is already in progress".format(
-                str(self)))
-            return False
-        elif sampleentry.get('analysis_status') != 'ANALYZED' \
-            and not self.force:
-            logger.info("{} has not finished analysis and will not be "\
-                "delivered".format(str(self)))
-            return False
-        else:
-            # Propagate raised errors upwards, they should trigger 
-            # notification to operator
-            if not self.stage_delivery():
-                raise DelivererError("sample was not properly staged")
-            logger.info("{} successfully staged".format(str(self)))
-            if not self.stage_only:
-                if not self.do_delivery():
-                    raise DelivererError("sample was not properly delivered")
-                logger.info("{} successfully delivered".format(str(self)))
-                self.update_delivery_status()
-            return True
+        except Exception as e:
+            self.update_delivery_status(status="FAILED")
+            raise
     
     def do_delivery(self):
         """ Deliver the staged delivery folder using rsync

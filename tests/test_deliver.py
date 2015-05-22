@@ -3,8 +3,10 @@
 import mock
 import os
 import shutil
+import signal
 import tempfile
 import unittest
+
 from ngi_pipeline.database import classes as db
 from taca_ngi_pipeline.deliver import deliver
 from taca.utils.transfer import SymlinkError, SymlinkAgent
@@ -386,6 +388,18 @@ class TestProjectDeliverer(unittest.TestCase):
             self.projectid,
             delivery_status="DELIVERED")
 
+    def test_catching_sigint(self):
+        """ SIGINT should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGINT)
+
+    def test_catching_sigterm(self):
+        """ SIGTERM should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGTERM)
+
 class TestSampleDeliverer(unittest.TestCase):  
     
     @classmethod
@@ -429,4 +443,16 @@ class TestSampleDeliverer(unittest.TestCase):
             self.projectid,
             self.sampleid,
             delivery_status="DELIVERED")
+
+    def test_catching_sigint(self):
+        """ SIGINT should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGINT)
+
+    def test_catching_sigterm(self):
+        """ SIGTERM should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGTERM)
         
