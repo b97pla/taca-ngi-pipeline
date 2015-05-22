@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import unittest
 from ngi_pipeline.database import classes as db
-from taca.deliver import deliver
+from taca_ngi_pipeline.deliver import deliver
 from taca.utils.transfer import SymlinkError
 
 SAMPLECFG = {
