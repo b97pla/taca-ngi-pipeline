@@ -127,6 +127,19 @@ class Deliverer(object):
                 destination path and the checksum of the source file 
                 (or None if source is a folder)
         """
+        def get_hash(sourcepath,destpath):
+            hash = None
+            if not self.no_checksum:
+                checksumpath = "{}.{}".format(sourcepath,self.hash_algorithm)
+                if not os.path.exists(checksumpath):
+                    hash = hashfile(sourcepath,hasher=self.hash_algorithm)
+                    with open(checksumpath,'w') as fh:
+                        fh.write(hash)
+                else:
+                    with open(checksumpath,'r') as fh:
+                        hash = fh.next()
+            return (sourcepath,destpath,hash)
+            
         for sfile, dfile in getattr(self,'files_to_deliver',[]):
             dest_path = self.expand_path(dfile)
             for f in glob.iglob(self.expand_path(sfile)):
@@ -138,15 +151,10 @@ class Deliverer(object):
                             fpath = os.path.join(pdir,current)
                             # use the relative path for the destination path
                             fname = os.path.relpath(fpath,fparent)
-                            yield(fpath,
-                                os.path.join(dest_path,fname),
-                                hashfile(fpath,hasher=self.hash_algorithm) \
-                                if not self.no_checksum else None)
+                            yield get_hash(fpath,os.path.join(dest_path,fname))
                 else:
-                    yield (f, 
-                        os.path.join(dest_path,os.path.basename(f)), 
-                        hashfile(f,hasher=self.hash_algorithm) \
-                        if not self.no_checksum else None)
+                    yield get_hash(f,
+                        os.path.join(dest_path,os.path.basename(f)))
     
     def stage_delivery(self):
         """ Stage a delivery by symlinking source paths to destination paths 
@@ -331,7 +339,13 @@ class SampleDeliverer(Deliverer):
         if sampleentry.get('delivery_status') == 'DELIVERED' and not self.force:
             logger.info("{} has already been delivered".format(str(self)))
             return True
-        elif sampleentry.get('analysis_status') != 'ANALYZED' and not self.force:
+        elif sampleentry.get('delivery_status') == 'IN_PROGRESS' \
+            and not self.force:
+            logger.info("delivery of {} is already in progress".format(
+                str(self)))
+            return False
+        elif sampleentry.get('analysis_status') != 'ANALYZED' \
+            and not self.force:
             logger.info("{} has not finished analysis and will not be "\
                 "delivered".format(str(self)))
             return False

@@ -16,6 +16,7 @@ SAMPLECFG = {
         'stagingpath': '_ROOTDIR_/STAGING',
         'delivery_folder': '_ROOTDIR_/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
+        'hash_algorithm': 'md5',
         'files_to_deliver': [
             ['_ANALYSISPATH_/level0_folder?_file*',
             '_STAGINGPATH_'],
@@ -187,6 +188,32 @@ class TestDeliverer(unittest.TestCase):
         self.assertItemsEqual(
             [os.path.basename(p) for p,_,_ in self.deliverer.gather_files()],
             expected)
+
+    def test_gather_files6(self):
+        """ Checksum should be cached in checksum file """
+        pattern = SAMPLECFG['deliver']['files_to_deliver'][5]
+        self.deliverer.files_to_deliver = [pattern]
+        # create a checksum file and assert that it was used as a cache
+        exp_checksum = "this checksum should be cached"
+        checksumfile = "{}.{}".format(
+            self.deliverer.expand_path(pattern[0]),
+            self.deliverer.hash_algorithm)
+        with open(checksumfile,'w') as fh:
+            fh.write(exp_checksum)
+        for _,_,obs_checksum in self.deliverer.gather_files():
+            self.assertEqual(
+                obs_checksum,
+                exp_checksum,
+                "checksum '{}' from cache file was not picked up: '{}'".format(obs_checksum,exp_checksum))
+        # remove the checksum file and assert that it is created
+        os.unlink(checksumfile)
+        for _,_,exp_checksum in self.deliverer.gather_files():
+            self.assertTrue(os.path.exists(checksumfile),
+                "checksum cache file was not created")
+            with open(checksumfile,'r') as fh:
+                obs_checksum = fh.next()
+            self.assertEqual(obs_checksum,exp_checksum,
+                "cached and returned checksums did not match")
         
     def test_gather_files7(self):
         """ Traverse folders also if they are symlinks """
