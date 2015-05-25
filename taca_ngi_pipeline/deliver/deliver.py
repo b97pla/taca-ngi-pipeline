@@ -133,7 +133,7 @@ class Deliverer(object):
                 if (os.path.isdir(f)):
                     fparent = os.path.dirname(f)
                     # walk over all folders and files below
-                    for pdir,_,files in os.walk(f):
+                    for pdir,_,files in os.walk(f,followlinks=True):
                         for current in files:
                             fpath = os.path.join(pdir,current)
                             # use the relative path for the destination path
