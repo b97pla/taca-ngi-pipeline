@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from ngi_pipeline.database import classes as db
 from taca_ngi_pipeline.deliver import deliver
-from taca.utils.transfer import SymlinkError
+from taca.utils.transfer import SymlinkError, SymlinkAgent
 
 SAMPLECFG = {
     'deliver': {
@@ -28,6 +28,8 @@ SAMPLECFG = {
             ['_ANALYSISPATH_/*/*/this-file-does-not-exist',
             '_STAGINGPATH_'],
             ['_ANALYSISPATH_/level0_folder0_file0',
+            '_STAGINGPATH_'],
+            ['_DATAPATH_/level1_folder1/level2_folder1/level3_folder1',
             '_STAGINGPATH_'],
         ]}}
 
@@ -184,6 +186,41 @@ class TestDeliverer(unittest.TestCase):
         self.deliverer.files_to_deliver = [pattern]
         self.assertItemsEqual(
             [os.path.basename(p) for p,_,_ in self.deliverer.gather_files()],
+            expected)
+        
+    def test_gather_files7(self):
+        """ Traverse folders also if they are symlinks """
+        dest_path = self.deliverer.expand_path(
+            os.path.join(
+                self.deliverer.datapath,
+                "level1_folder1",
+                "level2_folder1",
+                "level3_folder1"))
+        sa = SymlinkAgent(
+            src_path=self.deliverer.expand_path(
+                os.path.join(
+                    self.deliverer.analysispath,
+                    "level1_folder0",
+                    "level2_folder0",
+                    "level3_folder0")),
+            dest_path=os.path.join(dest_path,"level3_folder0"),
+            relative=False)
+        self.assertTrue(
+            sa.transfer(),
+            "failed when setting up test")
+        
+        expected = [os.path.join(dest_path,"level3_folder1_file{}".format(n)) 
+                    for n in xrange(self.nfiles)]
+        expected.extend([
+            os.path.join(
+                dest_path,
+                "level3_folder0",
+                "level3_folder0_file{}".format(n)) 
+                    for n in xrange(self.nfiles)])
+        pattern = SAMPLECFG['deliver']['files_to_deliver'][6]
+        self.deliverer.files_to_deliver = [pattern]
+        self.assertItemsEqual(
+            [p for p,_,_ in self.deliverer.gather_files()],
             expected)
     
     def test_stage_delivery1(self):
