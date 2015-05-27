@@ -4,8 +4,8 @@ python:
     - "2.7"
 
 before_install:
-    - export CHARON_BASE_URL=""
-    - export CHARON_API_TOKEN=""
+    - export CHARON_BASE_URL="http://tracking.database.org"
+    - export CHARON_API_TOKEN="charonapitokengoeshere"
     - mkdir /home/travis/.ngipipeline
     - "echo foo: bar > /home/travis/.ngipipeline/ngi_config.yaml"
 
