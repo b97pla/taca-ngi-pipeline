@@ -142,6 +142,9 @@ class Deliverer(object):
         """
         def get_hash(sourcepath,destpath):
             hash = None
+            # ignore checksum files
+            if sourcepath.endswith(".{}".format(self.hash_algorithm)):
+                return (None,None,None)
             if not self.no_checksum:
                 checksumpath = "{}.{}".format(sourcepath,self.hash_algorithm)
                 if not os.path.exists(checksumpath):
@@ -190,6 +193,8 @@ class Deliverer(object):
             with open(digestpath,'w') as dh:
                 agent = transfer.SymlinkAgent(None, None, relative=True)
                 for src, dst, digest in self.gather_files():
+                    if src is None:
+                        continue
                     agent.src_path = src
                     agent.dest_path = dst
                     try:
