@@ -256,7 +256,7 @@ class TestDeliverer(unittest.TestCase):
 
     def test_gather_files8(self):
         """ Skip checksum files """
-        expected = [(None,None,None)]
+        expected = []
         pattern = SAMPLECFG['deliver']['files_to_deliver'][7]
         self.deliverer.files_to_deliver = [pattern]
         open(self.deliverer.expand_path(pattern[0]),'w').close()

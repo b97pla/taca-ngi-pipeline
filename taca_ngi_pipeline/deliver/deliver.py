@@ -140,11 +140,8 @@ class Deliverer(object):
                 destination path and the checksum of the source file 
                 (or None if source is a folder)
         """
-        def get_hash(sourcepath,destpath):
+        def _get_hash(sourcepath,destpath):
             hash = None
-            # ignore checksum files
-            if sourcepath.endswith(".{}".format(self.hash_algorithm)):
-                return (None,None,None)
             if not self.no_checksum:
                 checksumpath = "{}.{}".format(sourcepath,self.hash_algorithm)
                 if not os.path.exists(checksumpath):
@@ -156,24 +153,32 @@ class Deliverer(object):
                         hash = fh.next()
             return (sourcepath,destpath,hash)
             
+        def _walk_files(currpath, destpath):
+            # if current path is a folder, return all files below it
+            if (os.path.isdir(currpath)):
+                parent = os.path.dirname(currpath)
+                for parentdir,_,dirfiles in os.walk(currpath,followlinks=True):
+                    for currfile in dirfiles:
+                        fullpath = os.path.join(parentdir,currfile)
+                        # the relative path will be used in the destination path
+                        relpath = os.path.relpath(fullpath,parent)
+                        yield (fullpath,os.path.join(destpath,relpath))
+            else:
+                yield (currpath,
+                    os.path.join(
+                        destpath,
+                        os.path.basename(currpath)))
+
         for sfile, dfile in getattr(self,'files_to_deliver',[]):
             dest_path = self.expand_path(dfile)
             src_path = self.expand_path(sfile)
             matches = 0
             for f in glob.iglob(src_path):
-                matches += 1
-                if (os.path.isdir(f)):
-                    fparent = os.path.dirname(f)
-                    # walk over all folders and files below
-                    for pdir,_,files in os.walk(f,followlinks=True):
-                        for current in files:
-                            fpath = os.path.join(pdir,current)
-                            # use the relative path for the destination path
-                            fname = os.path.relpath(fpath,fparent)
-                            yield get_hash(fpath,os.path.join(dest_path,fname))
-                else:
-                    yield get_hash(f,
-                        os.path.join(dest_path,os.path.basename(f)))
+                for spath, dpath in _walk_files(f,dest_path):
+                    # ignore checksum files
+                    if not spath.endswith(".{}".format(self.hash_algorithm)):
+                        matches += 1
+                        yield _get_hash(spath,dpath)
             if matches == 0:
                 logger.warning("no files matching search expression '{}' "\
                     "found ".format(src_path))
