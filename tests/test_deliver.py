@@ -34,6 +34,8 @@ SAMPLECFG = {
             '_STAGINGPATH_'],
             ['_DATAPATH_/level1_folder1/level2_folder1/level3_folder1',
             '_STAGINGPATH_'],
+            ['_DATAPATH_/level1_folder1/level1_folder1_file1.md5',
+            '_STAGINGPATH_'],
         ]}}
 
 class TestDeliverer(unittest.TestCase):  
@@ -250,6 +252,16 @@ class TestDeliverer(unittest.TestCase):
         self.deliverer.files_to_deliver = [pattern]
         self.assertItemsEqual(
             [p for p,_,_ in self.deliverer.gather_files()],
+            expected)
+
+    def test_gather_files8(self):
+        """ Skip checksum files """
+        expected = [(None,None,None)]
+        pattern = SAMPLECFG['deliver']['files_to_deliver'][7]
+        self.deliverer.files_to_deliver = [pattern]
+        open(self.deliverer.expand_path(pattern[0]),'w').close()
+        self.assertItemsEqual(
+            [obs for obs in self.deliverer.gather_files()],
             expected)
     
     def test_stage_delivery1(self):
