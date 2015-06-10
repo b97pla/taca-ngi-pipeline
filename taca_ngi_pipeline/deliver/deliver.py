@@ -140,18 +140,18 @@ class Deliverer(object):
                 destination path and the checksum of the source file 
                 (or None if source is a folder)
         """
-        def _get_hash(sourcepath,destpath):
-            hash = None
+        def _get_digest(sourcepath,destpath):
+            digest = None
             if not self.no_checksum:
                 checksumpath = "{}.{}".format(sourcepath,self.hash_algorithm)
                 if not os.path.exists(checksumpath):
-                    hash = hashfile(sourcepath,hasher=self.hash_algorithm)
+                    digest = hashfile(sourcepath,hasher=self.hash_algorithm)
                     with open(checksumpath,'w') as fh:
-                        fh.write(hash)
+                        fh.write(digest)
                 else:
                     with open(checksumpath,'r') as fh:
-                        hash = fh.next()
-            return (sourcepath,destpath,hash)
+                        digest = fh.next()
+            return (sourcepath,destpath,digest)
             
         def _walk_files(currpath, destpath):
             # if current path is a folder, return all files below it
@@ -178,7 +178,7 @@ class Deliverer(object):
                     # ignore checksum files
                     if not spath.endswith(".{}".format(self.hash_algorithm)):
                         matches += 1
-                        yield _get_hash(spath,dpath)
+                        yield _get_digest(spath,dpath)
             if matches == 0:
                 logger.warning("no files matching search expression '{}' "\
                     "found ".format(src_path))
