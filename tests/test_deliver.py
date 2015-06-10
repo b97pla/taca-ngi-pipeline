@@ -3,8 +3,10 @@
 import mock
 import os
 import shutil
+import signal
 import tempfile
 import unittest
+
 from ngi_pipeline.database import classes as db
 from taca_ngi_pipeline.deliver import deliver
 from taca.utils.transfer import SymlinkError, SymlinkAgent
@@ -16,6 +18,7 @@ SAMPLECFG = {
         'stagingpath': '_ROOTDIR_/STAGING',
         'delivery_folder': '_ROOTDIR_/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
+        'hash_algorithm': 'md5',
         'files_to_deliver': [
             ['_ANALYSISPATH_/level0_folder?_file*',
             '_STAGINGPATH_'],
@@ -30,6 +33,8 @@ SAMPLECFG = {
             ['_ANALYSISPATH_/level0_folder0_file0',
             '_STAGINGPATH_'],
             ['_DATAPATH_/level1_folder1/level2_folder1/level3_folder1',
+            '_STAGINGPATH_'],
+            ['_DATAPATH_/level1_folder1/level1_folder1_file1.md5',
             '_STAGINGPATH_'],
         ]}}
 
@@ -187,6 +192,32 @@ class TestDeliverer(unittest.TestCase):
         self.assertItemsEqual(
             [os.path.basename(p) for p,_,_ in self.deliverer.gather_files()],
             expected)
+
+    def test_gather_files6(self):
+        """ Checksum should be cached in checksum file """
+        pattern = SAMPLECFG['deliver']['files_to_deliver'][5]
+        self.deliverer.files_to_deliver = [pattern]
+        # create a checksum file and assert that it was used as a cache
+        exp_checksum = "this checksum should be cached"
+        checksumfile = "{}.{}".format(
+            self.deliverer.expand_path(pattern[0]),
+            self.deliverer.hash_algorithm)
+        with open(checksumfile,'w') as fh:
+            fh.write(exp_checksum)
+        for _,_,obs_checksum in self.deliverer.gather_files():
+            self.assertEqual(
+                obs_checksum,
+                exp_checksum,
+                "checksum '{}' from cache file was not picked up: '{}'".format(obs_checksum,exp_checksum))
+        # remove the checksum file and assert that it is created
+        os.unlink(checksumfile)
+        for _,_,exp_checksum in self.deliverer.gather_files():
+            self.assertTrue(os.path.exists(checksumfile),
+                "checksum cache file was not created")
+            with open(checksumfile,'r') as fh:
+                obs_checksum = fh.next()
+            self.assertEqual(obs_checksum,exp_checksum,
+                "cached and returned checksums did not match")
         
     def test_gather_files7(self):
         """ Traverse folders also if they are symlinks """
@@ -221,6 +252,16 @@ class TestDeliverer(unittest.TestCase):
         self.deliverer.files_to_deliver = [pattern]
         self.assertItemsEqual(
             [p for p,_,_ in self.deliverer.gather_files()],
+            expected)
+
+    def test_gather_files8(self):
+        """ Skip checksum files """
+        expected = []
+        pattern = SAMPLECFG['deliver']['files_to_deliver'][7]
+        self.deliverer.files_to_deliver = [pattern]
+        open(self.deliverer.expand_path(pattern[0]),'w').close()
+        self.assertItemsEqual(
+            [obs for obs in self.deliverer.gather_files()],
             expected)
     
     def test_stage_delivery1(self):
@@ -359,6 +400,18 @@ class TestProjectDeliverer(unittest.TestCase):
             self.projectid,
             delivery_status="DELIVERED")
 
+    def test_catching_sigint(self):
+        """ SIGINT should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGINT)
+
+    def test_catching_sigterm(self):
+        """ SIGTERM should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGTERM)
+
 class TestSampleDeliverer(unittest.TestCase):  
     
     @classmethod
@@ -402,4 +455,16 @@ class TestSampleDeliverer(unittest.TestCase):
             self.projectid,
             self.sampleid,
             delivery_status="DELIVERED")
+
+    def test_catching_sigint(self):
+        """ SIGINT should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGINT)
+
+    def test_catching_sigterm(self):
+        """ SIGTERM should raise DelivererInterruptedError
+        """
+        with self.assertRaises(deliver.DelivererInterruptedError):
+            os.kill(os.getpid(),signal.SIGTERM)
         

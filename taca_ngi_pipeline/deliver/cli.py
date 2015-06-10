@@ -39,14 +39,15 @@ def deliver(ctx,deliverypath,stagingpath,uppnexid,operator,stage_only,force):
 ## project delivery
 @deliver.command()
 @click.pass_context
-@click.argument('projectid',type=click.STRING,nargs=1)
+@click.argument('projectid',type=click.STRING,nargs=-1)
 def project(ctx, projectid):
-    """ Deliver the specified project to the specified destination
+    """ Deliver the specified projects to the specified destination
     """
-    d = _deliver.ProjectDeliverer(
-        projectid,
-        **ctx.parent.params)
-    _exec_delivery(d,d.deliver_project)
+    for pid in projectid:
+        d = _deliver.ProjectDeliverer(
+            pid,
+            **ctx.parent.params)
+        _exec_delivery(d,d.deliver_project)
     
 ## sample delivery
 @deliver.command()
