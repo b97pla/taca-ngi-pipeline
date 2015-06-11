@@ -214,6 +214,8 @@ class Deliverer(object):
                     fh.write("{}\n".format(fpath))
                     if digest is not None:
                         dh.write("{}  {}\n".format(digest,fpath))
+                # finally, include the digestfile in the list of files to deliver
+                fh.write("{}\n".format(os.path.basename(digestpath)))
         except IOError as e:
             raise DelivererError(
                 "failed to stage delivery - reason: {}".format(e))
@@ -226,7 +228,6 @@ class Deliverer(object):
         return self.expand_path(
             os.path.join(
                 self.deliverypath,
-                self.projectid,
                 os.path.basename(self.staging_digestfile())))
 
     def staging_digestfile(self):
@@ -346,7 +347,6 @@ class ProjectDeliverer(Deliverer):
         except Exception as e:
             self.update_delivery_status(status="FAILED")
             raise
-            
 
     def update_delivery_status(self, status="DELIVERED"):
         """ Update the delivery_status field in the database to the supplied 
@@ -442,7 +442,7 @@ class SampleDeliverer(Deliverer):
             remote_user=getattr(self,'remote_user', None), 
             log=logger,
             opts={
-                '--files-from': self.staging_filelist(),
+                '--files-from': [self.staging_filelist()],
                 '--copy-links': None,
                 '--recursive': None,
                 '--perms': None,

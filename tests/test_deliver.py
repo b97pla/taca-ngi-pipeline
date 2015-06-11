@@ -9,6 +9,8 @@ import unittest
 
 from ngi_pipeline.database import classes as db
 from taca_ngi_pipeline.deliver import deliver
+from taca.utils.filesystem import create_folder
+from taca.utils.misc import hashfile
 from taca.utils.transfer import SymlinkError, SymlinkAgent
 
 SAMPLECFG = {
@@ -16,7 +18,7 @@ SAMPLECFG = {
         'analysispath': '_ROOTDIR_/ANALYSIS',
         'datapath': '_ROOTDIR_/DATA',
         'stagingpath': '_ROOTDIR_/STAGING',
-        'delivery_folder': '_ROOTDIR_/DELIVERY_DESTINATION',
+        'deliverypath': '_ROOTDIR_/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
         'hash_algorithm': 'md5',
         'files_to_deliver': [
@@ -73,7 +75,6 @@ class TestDeliverer(unittest.TestCase):
         except:
             pass
             
-    @classmethod
     def create_content(self,parentdir,level=0,folder=0):
         if not os.path.exists(parentdir):
             os.mkdir(parentdir)
@@ -467,4 +468,40 @@ class TestSampleDeliverer(unittest.TestCase):
         """
         with self.assertRaises(deliver.DelivererInterruptedError):
             os.kill(os.getpid(),signal.SIGTERM)
-        
+
+    def test_deliver_sample1(self):
+        """ transfer a sample using rsync
+        """
+        # create some content to transfer
+        digestfile = self.deliverer.staging_digestfile()
+        filelist = self.deliverer.staging_filelist()
+        basedir = os.path.dirname(digestfile)
+        create_folder(basedir)
+        expected = []
+        with open(digestfile,'w') as dh, open(filelist,'w') as fh:
+            curdir = basedir
+            for d in xrange(4):
+                if d > 0:
+                    curdir = os.path.join(curdir,"folder{}".format(d))
+                    create_folder(curdir)
+                for n in xrange(5):
+                    fpath = os.path.join(curdir,"file{}".format(n))
+                    open(fpath,'w').close()
+                    rpath = os.path.relpath(fpath,basedir)
+                    dh.write("{}  {}\n".format(
+                        hashfile(fpath,hasher=self.deliverer.hash_algorithm),
+                        rpath))
+                    if n < 3:
+                        expected.append(rpath)
+                        fh.write("{}\n".format(rpath))
+            rpath = os.path.basename(digestfile)
+            expected.append(rpath)
+            fh.write("{}\n".format(rpath))
+        # transfer the listed content
+        destination = self.deliverer.expand_path(self.deliverer.deliverypath)
+        create_folder(os.path.dirname(destination))
+        self.assertTrue(self.deliverer.do_delivery(),"failed to deliver sample")
+        # list the trasferred files relative to the destination
+        observed = [os.path.relpath(os.path.join(d,f),destination) \
+            for d,_,files in os.walk(destination) for f in files]
+        self.assertItemsEqual(observed,expected)
