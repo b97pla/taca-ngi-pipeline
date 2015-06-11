@@ -193,13 +193,12 @@ class Deliverer(object):
             :raises DelivererError: if an unexpected error occurred
         """
         digestpath = self.staging_digestfile()
+        filelistpath = self.staging_filelist()
         create_folder(os.path.dirname(digestpath))
         try: 
-            with open(digestpath,'w') as dh:
+            with open(digestpath,'w') as dh, open(filelistpath,'w') as fh:
                 agent = transfer.SymlinkAgent(None, None, relative=True)
                 for src, dst, digest in self.gather_files():
-                    if src is None:
-                        continue
                     agent.src_path = src
                     agent.dest_path = dst
                     try:
@@ -208,11 +207,13 @@ class Deliverer(object):
                         logger.warning("failed to stage file '{}' when "\
                             "delivering {} - reason: {}".format(
                                 src,str(self),e))
+
+                    fpath = os.path.relpath(
+                        dst,
+                        self.expand_path(self.stagingpath))
+                    fh.write("{}\n".format(fpath))
                     if digest is not None:
-                        dh.write("{}  {}\n".format(
-                            digest,
-                            os.path.relpath(
-                                dst,self.expand_path(self.stagingpath))))
+                        dh.write("{}  {}\n".format(digest,fpath))
         except IOError as e:
             raise DelivererError(
                 "failed to stage delivery - reason: {}".format(e))
@@ -236,6 +237,16 @@ class Deliverer(object):
             os.path.join(
                 self.stagingpath,
                 "{}.{}".format(self.sampleid,self.hash_algorithm)))
+
+    def staging_filelist(self):
+        """
+            :returns: path to the file with a list of files to transfer
+                after staging
+        """
+        return self.expand_path(
+            os.path.join(
+                self.stagingpath,
+                "{}.lst".format(self.sampleid)))
 
     def transfer_log(self):
         """
@@ -431,6 +442,7 @@ class SampleDeliverer(Deliverer):
             remote_user=getattr(self,'remote_user', None), 
             log=logger,
             opts={
+                '--files-from': self.staging_filelist(),
                 '--copy-links': None,
                 '--recursive': None,
                 '--perms': None,
