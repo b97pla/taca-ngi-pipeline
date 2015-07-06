@@ -21,6 +21,7 @@ SAMPLECFG = {
         'stagingpath': '_ROOTDIR_/STAGING',
         'deliverypath': '_ROOTDIR_/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
+        'logpath': '_ROOTDIR_/ANALYSIS/logs',
         'hash_algorithm': 'md5',
         'files_to_deliver': [
             ['_ANALYSISPATH_/level0_folder?_file*',
@@ -399,6 +400,29 @@ class TestDeliverer(unittest.TestCase):
         with self.assertRaises(deliver.DelivererError):
             self.deliverer.expand_path("this-path-_WONT_-be-touched")
 
+    def test_acknowledge_sample_delivery(self):
+        """ A delivery acknowledgement should be written if requirements are met
+        """
+        # without the logpath attribute, no acknowledgement should be written
+        del self.deliverer.logpath
+        self.deliverer.acknowledge_delivery()
+        ackfile = os.path.join(
+            self.deliverer.expand_path(SAMPLECFG['deliver']['logpath']),
+            "{}_delivered.ack".format(self.sampleid))
+        self.assertFalse(os.path.exists(ackfile),
+            "delivery acknowledgement was created but it shouldn't have been")
+        # with the logpath attribute, acknowledgement should be written with
+        # the supplied timestamp
+        self.deliverer.logpath = SAMPLECFG['deliver']['logpath']
+        for t in [deliver._timestamp(),"this-is-a-timestamp"]:
+            self.deliverer.acknowledge_delivery(tstamp=t)
+            self.assertTrue(os.path.exists(ackfile),
+                "delivery acknowledgement not created")
+            with open(ackfile,'r') as fh:
+                self.assertEquals(t,fh.read().strip(),
+                    "delivery acknowledgement did not match expectation")
+            os.unlink(ackfile)
+
 class TestProjectDeliverer(unittest.TestCase):  
     
     @classmethod
@@ -451,6 +475,15 @@ class TestProjectDeliverer(unittest.TestCase):
         """
         with self.assertRaises(deliver.DelivererInterruptedError):
             os.kill(os.getpid(),signal.SIGTERM)
+
+    def test_acknowledge_project_delivery(self):
+        """ A project delivery acknowledgement should be written to disk """
+        self.deliverer.acknowledge_delivery()
+        ackfile = os.path.join(
+            self.deliverer.expand_path(SAMPLECFG['deliver']['logpath']),
+            "{}_delivered.ack".format(self.projectid))
+        self.assertTrue(os.path.exists(ackfile),
+            "delivery acknowledgement not created")
 
 class TestSampleDeliverer(unittest.TestCase):  
     
@@ -544,3 +577,12 @@ class TestSampleDeliverer(unittest.TestCase):
         observed = [os.path.relpath(os.path.join(d,f),destination) \
             for d,_,files in os.walk(destination) for f in files]
         self.assertItemsEqual(observed,expected)
+
+    def test_acknowledge_sample_delivery(self):
+        """ A sample delivery acknowledgement should be written to disk """
+        ackfile = os.path.join(
+            self.deliverer.expand_path(SAMPLECFG['deliver']['logpath']),
+            "{}_delivered.ack".format(self.sampleid))
+        self.deliverer.acknowledge_delivery()
+        self.assertTrue(os.path.exists(ackfile),
+            "delivery acknowledgement not created")

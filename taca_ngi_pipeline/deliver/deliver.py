@@ -31,6 +31,17 @@ def _signal_handler(signal, frame):
     raise DelivererInterruptedError(
         "interrupt signal {} received while delivering".format(signal))
 
+def _timestamp(days=None):
+    """Current date and time (UTC) in ISO format, with millisecond precision.
+    Add the specified offset in days, if given.
+    Stolen from https://github.com/NationalGenomicsInfrastructure/charon/blob/master/charon/utils.py
+    """
+    instant = datetime.datetime.utcnow()
+    if days:
+        instant += datetime.timedelta(days=days)
+    instant = instant.isoformat()
+    return instant[:-9] + "%06.3f" % float(instant[-9:]) + "Z"
+
 class Deliverer(object):
     """ 
         A (abstract) superclass with functionality for handling deliveries
@@ -69,6 +80,19 @@ class Deliverer(object):
         return "{}:{}".format(
             self.projectid,self.sampleid) \
             if self.sampleid is not None else self.projectid
+
+    def acknowledge_delivery(self,tstamp=_timestamp()):
+        try:
+            ackfile = self.expand_path(
+                os.path.join(self.logpath,"{}_delivered.ack".format(
+                    self.sampleid or self.projectid)))
+            create_folder(os.path.dirname(ackfile))
+            with open(ackfile,'w') as fh:
+                fh.write("{}\n".format(tstamp))
+        except (AttributeError, IOError) as e:
+            logger.warning(
+                "could not write delivery acknowledgement, reason: {}".format(
+                    e))
 
     @memoized
     def dbcon(self):
@@ -183,7 +207,12 @@ class Deliverer(object):
                     # ignore checksum files
                     if not spath.endswith(".{}".format(self.hash_algorithm)):
                         matches += 1
-                        yield _get_digest(spath,dpath)
+                        # skip and warn if a path does not exist, this includes broken symlinks
+                        if os.path.exists(spath):
+                            yield _get_digest(spath,dpath)
+                        else:
+                            logger.warning("path {} does not exist, possibly " \
+                                "because of a broken symlink".format(spath))
             if matches == 0:
                 logger.warning("no files matching search expression '{}' "\
                     "found ".format(src_path))
@@ -343,6 +372,7 @@ class ProjectDeliverer(Deliverer):
             
             if status:
                 self.update_delivery_status(status="DELIVERED")
+                self.acknowledge_delivery()
             else:
                 self.update_delivery_status(status="NOT DELIVERED")
             return status
@@ -425,6 +455,7 @@ class SampleDeliverer(Deliverer):
                         raise DelivererError("sample was not properly delivered")
                     logger.info("{} successfully delivered".format(str(self)))
                     self.update_delivery_status()
+                    self.acknowledge_delivery()
                 return True
         except DelivererInterruptedError as e:
             self.update_delivery_status(status="NOT DELIVERED")
