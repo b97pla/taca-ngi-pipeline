@@ -6,8 +6,10 @@ deliver:
     datapath: data/DATA/_PROJECTID_
     stagingpath: data/STAGING/_PROJECTID_
     deliverypath: data/DELIVERY/_PROJECTID_
-    logpath: _ANALYSISPATH_/logs
     report: True
+    reportpath: _ANALYSISPATH_/piper_ngi
+    logpath: _REPORTPATH_/logs
+    deliverystatuspath: _REPORTPATH_/08_misc
     operator: operator@domain.com
     files_to_deliver:
         -

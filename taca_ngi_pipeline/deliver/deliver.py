@@ -84,7 +84,7 @@ class Deliverer(object):
     def acknowledge_delivery(self, tstamp=_timestamp()):
         try:
             ackfile = self.expand_path(
-                os.path.join(self.logpath,"{}_delivered.ack".format(
+                os.path.join(self.deliverystatuspath,"{}_delivered.ack".format(
                     self.sampleid or self.projectid)))
             create_folder(os.path.dirname(ackfile))
             with open(ackfile,'w') as fh:
@@ -296,7 +296,7 @@ class Deliverer(object):
         """
         return self.expand_path(
             os.path.join(
-                self.stagingpath,
+                self.logpath,
                 "{}_{}".format(self.sampleid,
                     datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))))
                 
@@ -370,7 +370,7 @@ class ProjectDeliverer(Deliverer):
                 logprefix = None
         except AttributeError as e:
              logprefix = None
-        with chdir(self.expand_path(self.analysispath)):
+        with chdir(self.expand_path(self.reportpath)):
             call_external_command(
                 "ngi_reports ign_aggregate_report",
                 with_log_files=(logprefix is not None),
@@ -446,7 +446,7 @@ class SampleDeliverer(Deliverer):
                 logprefix = None
         except AttributeError as e:
              logprefix = None
-        with chdir(self.expand_path(self.analysispath)):
+        with chdir(self.expand_path(self.reportpath)):
             # create the ign_sample_report for this sample
             call_external_command(
                 "ngi_reports ign_sample_report --samples '{}'".format(
@@ -569,6 +569,7 @@ class SampleDeliverer(Deliverer):
                 '--verbose': None,
                 '--exclude': ["*rsync.out","*rsync.err"]
             })
+        create_folder(os.path.dirname(self.transfer_log()))
         try:
             return agent.transfer(transfer_log=self.transfer_log())
         except transfer.TransferError as e:

@@ -23,6 +23,8 @@ SAMPLECFG = {
         'deliverypath': '_ROOTDIR_/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
         'logpath': '_ROOTDIR_/ANALYSIS/logs',
+        'reportpath': '_ANALYSISPATH_',
+        'deliverystatuspath': '_ANALYSISPATH_',
         'hash_algorithm': 'md5',
         'files_to_deliver': [
             ['_ANALYSISPATH_/level0_folder?_file*',
@@ -405,17 +407,16 @@ class TestDeliverer(unittest.TestCase):
     def test_acknowledge_sample_delivery(self):
         """ A delivery acknowledgement should be written if requirements are met
         """
-        # without the logpath attribute, no acknowledgement should be written
-        del self.deliverer.logpath
+        # without the deliverystatuspath attribute, no acknowledgement should be written
+        del self.deliverer.deliverystatuspath
         self.deliverer.acknowledge_delivery()
         ackfile = os.path.join(
-            self.deliverer.expand_path(SAMPLECFG['deliver']['logpath']),
+            self.deliverer.expand_path(SAMPLECFG['deliver']['deliverystatuspath']),
             "{}_delivered.ack".format(self.sampleid))
         self.assertFalse(os.path.exists(ackfile),
             "delivery acknowledgement was created but it shouldn't have been")
-        # with the logpath attribute, acknowledgement should be written with
-        # the supplied timestamp
-        self.deliverer.logpath = SAMPLECFG['deliver']['logpath']
+        # with the deliverystatuspath attribute, acknowledgement should be written with the supplied timestamp
+        self.deliverer.deliverystatuspath = SAMPLECFG['deliver']['deliverystatuspath']
         for t in [deliver._timestamp(),"this-is-a-timestamp"]:
             self.deliverer.acknowledge_delivery(tstamp=t)
             self.assertTrue(os.path.exists(ackfile),
@@ -482,7 +483,7 @@ class TestProjectDeliverer(unittest.TestCase):
         """ A project delivery acknowledgement should be written to disk """
         self.deliverer.acknowledge_delivery()
         ackfile = os.path.join(
-            self.deliverer.expand_path(SAMPLECFG['deliver']['logpath']),
+            self.deliverer.expand_path(SAMPLECFG['deliver']['deliverystatuspath']),
             "{}_delivered.ack".format(self.projectid))
         self.assertTrue(os.path.exists(ackfile),
             "delivery acknowledgement not created")
@@ -614,7 +615,7 @@ class TestSampleDeliverer(unittest.TestCase):
     def test_acknowledge_sample_delivery(self):
         """ A sample delivery acknowledgement should be written to disk """
         ackfile = os.path.join(
-            self.deliverer.expand_path(SAMPLECFG['deliver']['logpath']),
+            self.deliverer.expand_path(SAMPLECFG['deliver']['deliverystatuspath']),
             "{}_delivered.ack".format(self.sampleid))
         self.deliverer.acknowledge_delivery()
         self.assertTrue(os.path.exists(ackfile),
