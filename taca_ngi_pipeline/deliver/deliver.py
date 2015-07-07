@@ -11,8 +11,8 @@ import signal
 from ngi_pipeline.database import classes as db
 from ngi_pipeline.utils.classes import memoized
 from taca.utils.config import CONFIG
-from taca.utils.filesystem import create_folder
-from taca.utils.misc import hashfile
+from taca.utils.filesystem import create_folder, chdir
+from taca.utils.misc import hashfile, call_external_command
 from taca.utils import transfer
 
 logger = logging.getLogger(__name__)
@@ -69,8 +69,8 @@ class Deliverer(object):
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             self.uppnexid = getattr(
-                self,'uppnexid',self.project_entry()['uppnex_id'])
-        except KeyError:
+                self,'uppnexid',self.db_entry()['uppnex_id'])
+        except (KeyError, NotImplementedError) as e:
             pass
         # set a custom signal handler to intercept interruptions
         signal.signal(signal.SIGINT,_signal_handler)
@@ -81,7 +81,7 @@ class Deliverer(object):
             self.projectid,self.sampleid) \
             if self.sampleid is not None else self.projectid
 
-    def acknowledge_delivery(self,tstamp=_timestamp()):
+    def acknowledge_delivery(self, tstamp=_timestamp()):
         try:
             ackfile = self.expand_path(
                 os.path.join(self.logpath,"{}_delivered.ack".format(
@@ -101,17 +101,11 @@ class Deliverer(object):
         """
         return db.CharonSession()
 
-    @memoized
-    def project_entry(self):
-        """ Fetch a database entry representing the instance's project
-            :returns: a json-formatted database entry
-            :raises DelivererDatabaseError: 
-                if an error occurred when communicating with the database
-        """
-        return self.wrap_database_query(
-            self.dbcon().project_get,self.projectid)
+    def db_entry(self):
+        """ Abstract method, should be implemented by subclasses """
+        raise NotImplementedError("This method should be implemented by "\
+        "subclass")
 
-    @memoized
     def project_sample_entries(self):
         """ Fetch the database sample entries representing the instance's project
             :returns: a list of json-formatted database sample entries
@@ -121,16 +115,6 @@ class Deliverer(object):
         return self.wrap_database_query(
             self.dbcon().project_get_samples,self.projectid)
 
-    @memoized
-    def sample_entry(self):
-        """ Fetch a database entry representing the instance's project and sample
-            :returns: a json-formatted database entry
-            :raises DelivererDatabaseError: 
-                if an error occurred when communicating with the database
-        """
-        return self.wrap_database_query(
-            self.dbcon().sample_get,self.projectid,self.sampleid)
-        
     def update_delivery_status(self, *args, **kwargs):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by "\
@@ -148,7 +132,29 @@ class Deliverer(object):
             return query_fn(*query_args,**query_kwargs)
         except db.CharonError as ce:
             raise DelivererDatabaseError(ce.message)
-            
+
+    def get_analysis_status(self, dbentry=None):
+        """ Returns the analysis status for this sample. If a sampleentry
+            dict is supplied, it will be used instead of fethcing from database
+
+            :params sampleentry: a database sample entry to use instead of
+                fetching from db
+            :returns: the analysis status of this sample as a string
+        """
+        dbentry = dbentry or self.db_entry()
+        return dbentry['analysis_status']
+
+    def get_delivery_status(self, dbentry=None):
+        """ Returns the delivery status for this sample. If a sampleentry
+            dict is supplied, it will be used instead of fethcing from database
+
+            :params sampleentry: a database sample entry to use instead of
+                fetching from db
+            :returns: the delivery status of this sample as a string
+        """
+        dbentry = dbentry or self.db_entry()
+        return dbentry['delivery_status']
+
     def gather_files(self):
         """ This method will locate files matching the patterns specified in 
             the config and compute the checksum and construct the staging path
@@ -339,6 +345,46 @@ class ProjectDeliverer(Deliverer):
             sampleid,
             **kwargs)
     
+    def all_samples_delivered(
+        self,
+        sampleentries=None):
+        """ Checks the delivery status of all project samples
+
+            :params sampleentries: a list of sample entry dicts to use instead
+                of fetching from database
+            :returns: True if all samples in this project has been successfully
+                delivered, False otherwise
+        """
+        sampleentries = sampleentries or \
+            self.project_sample_entries().get('samples',[])
+        return all([
+            self.get_delivery_status(sentry) == 'DELIVERED' \
+            for sentry in sampleentries])
+
+    def create_report(self):
+        """ Create a final aggregate report via a system call """
+        logprefix = os.path.abspath(
+            self.expand_path(os.path.join(self.logpath,"project")))
+        try:
+            if not create_folder(os.path.dirname(logprefix)):
+                logprefix = None
+        except AttributeError as e:
+             logprefix = None
+        with chdir(self.expand_path(self.analysispath)):
+            call_external_command(
+                "ngi_reports ign_aggregate_report",
+                with_log_files=(logprefix is not None),
+                prefix=logprefix)
+
+    def db_entry(self):
+        """ Fetch a database entry representing the instance's project
+            :returns: a json-formatted database entry
+            :raises DelivererDatabaseError:
+                if an error occurred when communicating with the database
+        """
+        return self.wrap_database_query(
+            self.dbcon().project_get,self.projectid)
+
     def deliver_project(self):
         """ Deliver all samples in a project to the destination specified by 
             deliverypath
@@ -349,38 +395,24 @@ class ProjectDeliverer(Deliverer):
         try:
             logger.info("Delivering {} to {}".format(
                 str(self),self.expand_path(self.deliverypath)))
-            projectentry = self.project_entry()
-            if projectentry.get('delivery_status') == 'DELIVERED' \
+            if self.get_delivery_status() == 'DELIVERED' \
                 and not self.force:
                 logger.info("{} has already been delivered".format(str(self)))
                 return True
-            try:
-                sampleentries = self.project_sample_entries()
-            except DelivererDatabaseError as e:
-                logger.error("error '{}' occurred during delivery of {}".format(
-                    str(e), str(self)))
-                raise
             # right now, don't catch any errors since we're assuming any thrown 
             # errors needs to be handled by manual intervention
-            self.update_delivery_status(status="IN_PROGRESS")
             status = True
-            for sampleentry in sampleentries.get('samples',[]):
-                st = SampleDeliverer(
-                    self.projectid,sampleentry.get('sampleid')
-                ).deliver_sample(sampleentry)
+            for sampleid in [sentry['sampleid'] \
+                for sentry in self.project_sample_entries().get('samples',[])]:
+                st = SampleDeliverer(self.projectid,sampleid).deliver_sample()
                 status = (status and st)
-            
-            if status:
+            # query the database whether all samples in the project have been sucessfully delivered
+            if self.all_samples_delivered():
+                # this is the only delivery status we want to set on the project level, in order to avoid concurrently running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
                 self.acknowledge_delivery()
-            else:
-                self.update_delivery_status(status="NOT DELIVERED")
             return status
-        except DelivererInterruptedError as e:
-            self.update_delivery_status(status="NOT DELIVERED")
-            raise
-        except Exception as e:
-            self.update_delivery_status(status="FAILED")
+        except (DelivererDatabaseError, DelivererInterruptedError, Exception) as e:
             raise
 
     def update_delivery_status(self, status="DELIVERED"):
@@ -404,15 +436,49 @@ class SampleDeliverer(Deliverer):
             projectid,
             sampleid,
             **kwargs)
-        
+
+    def create_report(self):
+        """ Create a sample report and an aggregate report via a system call """
+        logprefix = os.path.abspath(
+            self.expand_path(os.path.join(self.logpath,"sample")))
+        try:
+            if not create_folder(os.path.dirname(logprefix)):
+                logprefix = None
+        except AttributeError as e:
+             logprefix = None
+        with chdir(self.expand_path(self.analysispath)):
+            # create the ign_sample_report for this sample
+            call_external_command(
+                "ngi_reports ign_sample_report --samples '{}'".format(
+                    self.sampleid),
+                with_log_files=(logprefix is not None),
+                prefix=logprefix)
+            # estimate the delivery date for this sample to 0.5 days ahead
+            call_external_command(
+                "ngi_reports ign_aggregate_report --samples_extra "\
+                "'{\"{}\": {\"delivered\": \"{}\"}}'".format(
+                    self.sampleid,_timestamp(days=0.5)),
+                with_log_files=(logprefix is not None),
+                prefix=logprefix)
+
+    def db_entry(self):
+        """ Fetch a database entry representing the instance's project and sample
+            :returns: a json-formatted database entry
+            :raises DelivererDatabaseError:
+                if an error occurred when communicating with the database
+        """
+        return self.wrap_database_query(
+            self.dbcon().sample_get,self.projectid,self.sampleid)
+
     def deliver_sample(self, sampleentry=None):
         """ Deliver a sample to the destination specified by the config.
-            Will check if the sample has already been delivered and should not 
+            Will check if the sample has already been delivered and should not
             be delivered again or if the sample is not yet ready to be delivered.
-            
-            :params sampleentry: a database sample entry to use for delivery
-                but not sent to the receiver
-            :returns: True if sample was successfully delivered or was previously 
+
+            :params sampleentry: a database sample entry to use for delivery,
+                be very careful with caching the database entries though since
+                concurrent processes can update the database at any time
+            :returns: True if sample was successfully delivered or was previously
                 delivered, False if sample was not yet ready to be delivered
             :raises DelivererDatabaseError: if an entry corresponding to this
                 sample could not be found in the database
@@ -420,50 +486,67 @@ class SampleDeliverer(Deliverer):
                 has taken place but should be replaced
             :raises DelivererError: if the delivery failed
         """
+        # propagate raised errors upwards, they should trigger notification to operator
         try:
             logger.info("Delivering {} to {}".format(
                 str(self),self.expand_path(self.deliverypath)))
             try:
-                sampleentry = sampleentry or self.sample_entry()
+                if self.get_analysis_status(sampleentry) != 'ANALYZED' \
+                    and not self.force:
+                    logger.info("{} has not finished analysis and will not be "\
+                        "delivered".format(str(self)))
+                    return False
+                if self.get_delivery_status(sampleentry) == 'DELIVERED' \
+                    and not self.force:
+                    logger.info("{} has already been delivered".format(str(self)))
+                    return True
+                elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
+                    and not self.force:
+                    logger.info("delivery of {} is already in progress".format(
+                        str(self)))
+                    return False
+                elif self.get_delivery_status(sampleentry) == 'FAILED':
+                    logger.info("retrying delivery of previously failed "\
+                    "sample {}".format(str(self)))
             except DelivererDatabaseError as e:
                 logger.error(
                     "error '{}' occurred during delivery of {}".format(
                         str(e),str(self)))
                 raise
-            if sampleentry.get('delivery_status') == 'DELIVERED' and not self.force:
-                logger.info("{} has already been delivered".format(str(self)))
-                return True
-            elif sampleentry.get('delivery_status') == 'IN_PROGRESS' \
-                and not self.force:
-                logger.info("delivery of {} is already in progress".format(
-                    str(self)))
-                return False
-            elif sampleentry.get('analysis_status') != 'ANALYZED' \
-                and not self.force:
-                logger.info("{} has not finished analysis and will not be "\
-                    "delivered".format(str(self)))
-                return False
-            else:
-                # Propagate raised errors upwards, they should trigger 
-                # notification to operator
-                self.update_delivery_status(status="IN_PROGRESS")
-                if not self.stage_delivery():
-                    raise DelivererError("sample was not properly staged")
-                logger.info("{} successfully staged".format(str(self)))
-                if not self.stage_only:
-                    if not self.do_delivery():
-                        raise DelivererError("sample was not properly delivered")
-                    logger.info("{} successfully delivered".format(str(self)))
-                    self.update_delivery_status()
-                    self.acknowledge_delivery()
-                return True
+            # set the delivery status to in_progress which will also mean that any concurrent deliveries will leave this sample alone
+            self.update_delivery_status(status="IN_PROGRESS")
+            # an error with the reports should not abort the delivery, so handle
+            try:
+                if self.report is True:
+                    logger.info("creating sample report")
+                    self.create_report()
+            except AttributeError as e:
+                pass
+            except Exception as e:
+                logger.warning(
+                    "failed to create reports for {}, reason: {}".format(
+                        self,e))
+            # stage the delivery
+            if not self.stage_delivery():
+                raise DelivererError("sample was not properly staged")
+            logger.info("{} successfully staged".format(str(self)))
+            if not self.stage_only:
+                # perform the delivery
+                if not self.do_delivery():
+                    raise DelivererError("sample was not properly delivered")
+                logger.info("{} successfully delivered".format(str(self)))
+                # set the delivery status in database
+                self.update_delivery_status()
+                # write a delivery acknowledgement to disk
+                self.acknowledge_delivery()
+            return True
         except DelivererInterruptedError as e:
             self.update_delivery_status(status="NOT DELIVERED")
             raise
         except Exception as e:
             self.update_delivery_status(status="FAILED")
             raise
-    
+
     def do_delivery(self):
         """ Deliver the staged delivery folder using rsync
             :returns: True if delivery was successful, False if unsuccessful
@@ -490,7 +573,7 @@ class SampleDeliverer(Deliverer):
             return agent.transfer(transfer_log=self.transfer_log())
         except transfer.TransferError as e:
             raise DelivererRsyncError(e)
-    
+
     def update_delivery_status(self, status="DELIVERED"):
         """ Update the delivery_status field in the database to the supplied 
             status for the project and sample specified by this instance
