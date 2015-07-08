@@ -52,7 +52,8 @@ SAMPLEENTRY = json.loads(
 PROJECTENTRY = json.loads(
     '{"delivery_status": "this-is-the-project-delivery-status", '\
     '"analysis_status": "this-is-the-project-analysis-status", '\
-    '"projectid": "NGIU-P001"}')
+    '"projectid": "NGIU-P001", '\
+    '"uppnex_id": "a2099999"}')
 PROJECTENTRY['samples'] = [SAMPLEENTRY]
 
 class TestDeliverer(unittest.TestCase):  
@@ -548,7 +549,21 @@ class TestSampleDeliverer(unittest.TestCase):
         self.assertIsInstance(
             getattr(self,'deliverer'),
             deliver.SampleDeliverer)
-    
+
+    @mock.patch.object(
+        deliver.db.CharonSession,'project_get',return_value=PROJECTENTRY)
+    def test_fetch_uppnexid(self,dbmock):
+        """ A SampleDeliverer should be able to fetch the Uppnex ID for the 
+            project
+        """
+        self.deliverer = deliver.SampleDeliverer(
+            self.projectid,
+            self.sampleid,
+            rootdir=self.casedir,
+            **SAMPLECFG['deliver'])
+        self.assertEquals(self.deliverer.uppnexid,PROJECTENTRY['uppnex_id'])
+        dbmock.assert_called_with(self.projectid)
+
     @mock.patch.object(
         deliver.db.CharonSession,
         'sample_update',

@@ -71,8 +71,8 @@ class Deliverer(object):
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             self.uppnexid = getattr(
-                self,'uppnexid',self.db_entry()['uppnex_id'])
-        except (KeyError, NotImplementedError) as e:
+                self,'uppnexid',self.project_entry()['uppnex_id'])
+        except KeyError as e:
             pass
         # set a custom signal handler to intercept interruptions
         signal.signal(signal.SIGINT,_signal_handler)
@@ -107,6 +107,15 @@ class Deliverer(object):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by "\
         "subclass")
+
+    def project_entry(self):
+        """ Fetch a database entry representing the instance's project
+            :returns: a json-formatted database entry
+            :raises DelivererDatabaseError:
+                if an error occurred when communicating with the database
+        """
+        return self.wrap_database_query(
+            self.dbcon().project_get,self.projectid)
 
     def project_sample_entries(self):
         """ Fetch the database sample entries representing the instance's project
@@ -384,8 +393,7 @@ class ProjectDeliverer(Deliverer):
             :raises DelivererDatabaseError:
                 if an error occurred when communicating with the database
         """
-        return self.wrap_database_query(
-            self.dbcon().project_get,self.projectid)
+        return self.project_entry()
 
     def deliver_project(self):
         """ Deliver all samples in a project to the destination specified by 
