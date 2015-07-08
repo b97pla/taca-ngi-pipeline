@@ -66,6 +66,8 @@ class Deliverer(object):
             self,'hash_algorithm','sha1')
         self.no_checksum = getattr(
             self,'no_checksum',False)
+        self.ngi_node = getattr(
+            self,'ngi_node','unknown')
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             self.uppnexid = getattr(
@@ -372,7 +374,7 @@ class ProjectDeliverer(Deliverer):
              logprefix = None
         with chdir(self.expand_path(self.reportpath)):
             call_external_command(
-                "ngi_reports ign_aggregate_report",
+                "ngi_reports ign_aggregate_report -n {}".format(self.ngi_node),
                 with_log_files=(logprefix is not None),
                 prefix=logprefix)
 
@@ -449,15 +451,15 @@ class SampleDeliverer(Deliverer):
         with chdir(self.expand_path(self.reportpath)):
             # create the ign_sample_report for this sample
             call_external_command(
-                "ngi_reports ign_sample_report --samples '{}'".format(
-                    self.sampleid),
+                "ngi_reports ign_sample_report -n {} --samples '{}'".format(
+                    self.ngi_node,self.sampleid),
                 with_log_files=(logprefix is not None),
                 prefix=logprefix)
             # estimate the delivery date for this sample to 0.5 days ahead
             call_external_command(
-                "ngi_reports ign_aggregate_report --samples_extra "\
+                "ngi_reports ign_aggregate_report -n {} --samples_extra "\
                 "'{\"{}\": {\"delivered\": \"{}\"}}'".format(
-                    self.sampleid,_timestamp(days=0.5)),
+                    self.ngi_node,self.sampleid,_timestamp(days=0.5)),
                 with_log_files=(logprefix is not None),
                 prefix=logprefix)
 
