@@ -1,6 +1,7 @@
 """ Unit tests for the deliver commands """
 
 import __builtin__
+import json
 import mock
 import os
 import shutil
@@ -21,6 +22,9 @@ SAMPLECFG = {
         'stagingpath': '_ROOTDIR_/STAGING',
         'deliverypath': '_ROOTDIR_/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
+        'logpath': '_ROOTDIR_/ANALYSIS/logs',
+        'reportpath': '_ANALYSISPATH_',
+        'deliverystatuspath': '_ANALYSISPATH_',
         'hash_algorithm': 'md5',
         'files_to_deliver': [
             ['_ANALYSISPATH_/level0_folder?_file*',
@@ -40,6 +44,16 @@ SAMPLECFG = {
             ['_DATAPATH_/level1_folder1/level1_folder1_file1.md5',
             '_STAGINGPATH_'],
         ]}}
+
+SAMPLEENTRY = json.loads(
+    '{"delivery_status": "this-is-the-sample-delivery-status", '\
+    '"analysis_status": "this-is-the-sample-analysis-status", '\
+    '"sampleid": "NGIU-S001"}')
+PROJECTENTRY = json.loads(
+    '{"delivery_status": "this-is-the-project-delivery-status", '\
+    '"analysis_status": "this-is-the-project-analysis-status", '\
+    '"projectid": "NGIU-P001"}')
+PROJECTENTRY['samples'] = [SAMPLEENTRY]
 
 class TestDeliverer(unittest.TestCase):  
      
@@ -95,27 +109,18 @@ class TestDeliverer(unittest.TestCase):
                     "level{}_folder{}".format(level,nd)),
                 level,
                 nd)
-    
-    @mock.patch.object(
-        deliver.db.CharonSession,'sample_get',return_value="mocked return value")
-    def test_fetch_sample_db_entry(self,dbmock):
-        """ retrieving sample entry from db and caching result """
-        self.assertEquals(
-            self.deliverer.sample_entry(),
-            "mocked return value")
-        dbmock.assert_called_with(self.projectid,self.sampleid)
-        dbmock.reset_mock()
-        self.assertEquals(
-            self.deliverer.sample_entry(),
-            "mocked return value")
-        self.assertFalse(
-            dbmock.called,
-            "sample_get method should not have been called for cached result")
-    
+
+    def test_fetch_db_entry(self):
+        """ db_entry in parent class must not be called directly """
+        with self.assertRaises(NotImplementedError):
+            self.deliverer.db_entry()
+
     def test_update_sample_delivery(self):
+        """ update_delivery_status in parent class must not be called directly
+        """
         with self.assertRaises(NotImplementedError):
             self.deliverer.update_delivery_status()
-        
+
     @mock.patch.object(
         deliver.db.CharonSession,
         'project_create',
@@ -399,6 +404,28 @@ class TestDeliverer(unittest.TestCase):
         with self.assertRaises(deliver.DelivererError):
             self.deliverer.expand_path("this-path-_WONT_-be-touched")
 
+    def test_acknowledge_sample_delivery(self):
+        """ A delivery acknowledgement should be written if requirements are met
+        """
+        # without the deliverystatuspath attribute, no acknowledgement should be written
+        del self.deliverer.deliverystatuspath
+        self.deliverer.acknowledge_delivery()
+        ackfile = os.path.join(
+            self.deliverer.expand_path(SAMPLECFG['deliver']['deliverystatuspath']),
+            "{}_delivered.ack".format(self.sampleid))
+        self.assertFalse(os.path.exists(ackfile),
+            "delivery acknowledgement was created but it shouldn't have been")
+        # with the deliverystatuspath attribute, acknowledgement should be written with the supplied timestamp
+        self.deliverer.deliverystatuspath = SAMPLECFG['deliver']['deliverystatuspath']
+        for t in [deliver._timestamp(),"this-is-a-timestamp"]:
+            self.deliverer.acknowledge_delivery(tstamp=t)
+            self.assertTrue(os.path.exists(ackfile),
+                "delivery acknowledgement not created")
+            with open(ackfile,'r') as fh:
+                self.assertEquals(t,fh.read().strip(),
+                    "delivery acknowledgement did not match expectation")
+            os.unlink(ackfile)
+
 class TestProjectDeliverer(unittest.TestCase):  
     
     @classmethod
@@ -451,6 +478,46 @@ class TestProjectDeliverer(unittest.TestCase):
         """
         with self.assertRaises(deliver.DelivererInterruptedError):
             os.kill(os.getpid(),signal.SIGTERM)
+
+    def test_acknowledge_project_delivery(self):
+        """ A project delivery acknowledgement should be written to disk """
+        self.deliverer.acknowledge_delivery()
+        ackfile = os.path.join(
+            self.deliverer.expand_path(SAMPLECFG['deliver']['deliverystatuspath']),
+            "{}_delivered.ack".format(self.projectid))
+        self.assertTrue(os.path.exists(ackfile),
+            "delivery acknowledgement not created")
+
+    @mock.patch.object(
+        deliver.db.CharonSession,'project_get',return_value=PROJECTENTRY)
+    def test_get_delivery_status(self,dbmock):
+        """ retrieving delivery_status and analysis_status from db """
+        self.assertEquals(
+            self.deliverer.get_delivery_status(),
+            PROJECTENTRY.get('delivery_status'))
+        dbmock.assert_called_with(PROJECTENTRY['projectid'])
+        self.assertEquals(
+            self.deliverer.get_analysis_status(),
+            PROJECTENTRY.get('analysis_status'))
+        dbmock.assert_called_with(PROJECTENTRY['projectid'])
+
+    def test_all_samples_delivered(self):
+        """ retrieving all_samples_delivered status """
+        with mock.patch.object(deliver.db.CharonSession,'project_get_samples',
+            return_value=PROJECTENTRY) as dbmock:
+            self.assertFalse(
+                self.deliverer.all_samples_delivered(),
+                "all samples should not be listed as delivered")
+            dbmock.assert_called_with(PROJECTENTRY['projectid'])
+        PROJECTENTRY['samples'][0]['delivery_status'] = 'DELIVERED'
+        with mock.patch.object(deliver.db.CharonSession,'project_get_samples',
+            return_value=PROJECTENTRY) as dbmock:
+            self.assertTrue(
+                self.deliverer.all_samples_delivered(),
+                "all samples should not be listed as delivered")
+            dbmock.assert_called_with(PROJECTENTRY['projectid'])
+        PROJECTENTRY['samples'] = [SAMPLEENTRY]
+
 
 class TestSampleDeliverer(unittest.TestCase):  
     
@@ -544,3 +611,34 @@ class TestSampleDeliverer(unittest.TestCase):
         observed = [os.path.relpath(os.path.join(d,f),destination) \
             for d,_,files in os.walk(destination) for f in files]
         self.assertItemsEqual(observed,expected)
+
+    def test_acknowledge_sample_delivery(self):
+        """ A sample delivery acknowledgement should be written to disk """
+        ackfile = os.path.join(
+            self.deliverer.expand_path(SAMPLECFG['deliver']['deliverystatuspath']),
+            "{}_delivered.ack".format(self.sampleid))
+        self.deliverer.acknowledge_delivery()
+        self.assertTrue(os.path.exists(ackfile),
+            "delivery acknowledgement not created")
+
+    @mock.patch.object(
+        deliver.db.CharonSession,'sample_get',return_value="mocked return value")
+    def test_fetch_db_entry(self,dbmock):
+        """ retrieving sample entry from db """
+        self.assertEquals(
+            self.deliverer.db_entry(),
+            "mocked return value")
+        dbmock.assert_called_with(self.projectid,self.sampleid)
+
+    @mock.patch.object(
+        deliver.db.CharonSession,'sample_get',return_value=SAMPLEENTRY)
+    def test_get_delivery_status(self,dbmock):
+        """ retrieving delivery_status and analysis_status from db """
+        self.assertEquals(
+            self.deliverer.get_delivery_status(),
+            SAMPLEENTRY.get('delivery_status'))
+        dbmock.assert_called_with(self.projectid,SAMPLEENTRY.get('sampleid'))
+        self.assertEquals(
+            self.deliverer.get_analysis_status(),
+            SAMPLEENTRY.get('analysis_status'))
+        dbmock.assert_called_with(self.projectid,SAMPLEENTRY.get('sampleid'))
