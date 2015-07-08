@@ -3,6 +3,7 @@
 """
 import datetime
 import glob
+import json
 import logging
 import os
 import re
@@ -378,17 +379,23 @@ class ProjectDeliverer(Deliverer):
     def create_report(self):
         """ Create a final aggregate report via a system call """
         logprefix = os.path.abspath(
-            self.expand_path(os.path.join(self.logpath,"project")))
+            self.expand_path(os.path.join(self.logpath,self.projectid)))
         try:
             if not create_folder(os.path.dirname(logprefix)):
                 logprefix = None
         except AttributeError as e:
              logprefix = None
         with chdir(self.expand_path(self.reportpath)):
+            cl = [
+                "ngi_reports",
+                "ign_aggregate_report",
+                "-n",
+                self.ngi_node
+            ]
             call_external_command(
-                "ngi_reports ign_aggregate_report -n {}".format(self.ngi_node),
+                cl,
                 with_log_files=(logprefix is not None),
-                prefix=logprefix)
+                prefix="{}_aggregate".format(logprefix))
 
     def db_entry(self):
         """ Fetch a database entry representing the instance's project
@@ -424,6 +431,8 @@ class ProjectDeliverer(Deliverer):
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
                 self.acknowledge_delivery()
+                logger.info("creating final aggregated report")
+                self.create_report()
             return status
         except (DelivererDatabaseError, DelivererInterruptedError, Exception) as e:
             raise
@@ -453,7 +462,8 @@ class SampleDeliverer(Deliverer):
     def create_report(self):
         """ Create a sample report and an aggregate report via a system call """
         logprefix = os.path.abspath(
-            self.expand_path(os.path.join(self.logpath,"sample")))
+            self.expand_path(os.path.join(self.logpath,"{}-{}".format(
+                self.projectid,self.sampleid))))
         try:
             if not create_folder(os.path.dirname(logprefix)):
                 logprefix = None
@@ -461,18 +471,31 @@ class SampleDeliverer(Deliverer):
              logprefix = None
         with chdir(self.expand_path(self.reportpath)):
             # create the ign_sample_report for this sample
+            cl = [
+                "ngi_reports",
+                "ign_sample_report",
+                "-n",
+                self.ngi_node,
+                "--samples",
+                self.sampleid
+            ]
             call_external_command(
-                "ngi_reports ign_sample_report -n {} --samples '{}'".format(
-                    self.ngi_node,self.sampleid),
+                cl,
                 with_log_files=(logprefix is not None),
-                prefix=logprefix)
+                prefix="{}_sample".format(logprefix))
             # estimate the delivery date for this sample to 0.5 days ahead
+            cl = [
+                "ngi_reports",
+                "ign_aggregate_report",
+                "-n",
+                self.ngi_node,
+                "--samples_extra",
+                json.dumps({self.sampleid: {"delivered": _timestamp(days=0.5)}})
+            ]
             call_external_command(
-                "ngi_reports ign_aggregate_report -n {} --samples_extra "\
-                "'{\"{}\": {\"delivered\": \"{}\"}}'".format(
-                    self.ngi_node,self.sampleid,_timestamp(days=0.5)),
+                cl,
                 with_log_files=(logprefix is not None),
-                prefix=logprefix)
+                prefix="{}_aggregate".format(logprefix))
 
     def db_entry(self):
         """ Fetch a database entry representing the instance's project and sample
