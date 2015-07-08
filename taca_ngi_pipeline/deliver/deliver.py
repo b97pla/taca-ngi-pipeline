@@ -70,10 +70,13 @@ class Deliverer(object):
             self,'ngi_node','unknown')
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
-            self.uppnexid = getattr(
-                self,'uppnexid',self.project_entry()['uppnex_id'])
-        except KeyError as e:
-            pass
+            t = self.uppnexid
+        except AttributeError:
+            try:
+                t = self.project_entry()['uppnex_id']
+                self.uppnexid = t
+            except KeyError:
+                pass
         # set a custom signal handler to intercept interruptions
         signal.signal(signal.SIGINT,_signal_handler)
         signal.signal(signal.SIGTERM,_signal_handler)
