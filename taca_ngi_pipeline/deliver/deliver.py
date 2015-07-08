@@ -156,7 +156,7 @@ class Deliverer(object):
             :returns: the analysis status of this sample as a string
         """
         dbentry = dbentry or self.db_entry()
-        return dbentry['analysis_status']
+        return dbentry.get('analysis_status','TO_ANALYZE')
 
     def get_delivery_status(self, dbentry=None):
         """ Returns the delivery status for this sample. If a sampleentry
@@ -167,7 +167,7 @@ class Deliverer(object):
             :returns: the delivery status of this sample as a string
         """
         dbentry = dbentry or self.db_entry()
-        return dbentry['delivery_status']
+        return dbentry.get('delivery_status','NOT_DELIVERED')
 
     def gather_files(self):
         """ This method will locate files matching the patterns specified in 
