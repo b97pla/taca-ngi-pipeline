@@ -7,6 +7,7 @@ deliver:
     stagingpath: data/STAGING/_PROJECTID_
     deliverypath: data/DELIVERY/_PROJECTID_
     report: True
+    ngi_node: uppsala
     reportpath: _ANALYSISPATH_/piper_ngi
     logpath: _REPORTPATH_/logs
     deliverystatuspath: _REPORTPATH_/08_misc
