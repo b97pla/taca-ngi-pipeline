@@ -52,7 +52,8 @@ SAMPLEENTRY = json.loads(
 PROJECTENTRY = json.loads(
     '{"delivery_status": "this-is-the-project-delivery-status", '\
     '"analysis_status": "this-is-the-project-analysis-status", '\
-    '"projectid": "NGIU-P001"}')
+    '"projectid": "NGIU-P001", '\
+    '"uppnex_id": "a2099999"}')
 PROJECTENTRY['samples'] = [SAMPLEENTRY]
 
 class TestDeliverer(unittest.TestCase):  
@@ -548,7 +549,32 @@ class TestSampleDeliverer(unittest.TestCase):
         self.assertIsInstance(
             getattr(self,'deliverer'),
             deliver.SampleDeliverer)
-    
+
+    @mock.patch.object(
+        deliver.db.CharonSession,'project_get',return_value=PROJECTENTRY)
+    def test_fetch_uppnexid(self,dbmock):
+        """ A SampleDeliverer should be able to fetch the Uppnex ID for the 
+            project
+        """
+        # if an uppnexid is given in the configuration, it should be used and the database should not be queried
+        deliverer = deliver.SampleDeliverer(
+            self.projectid,
+            self.sampleid,
+            rootdir=self.casedir,
+            uppnexid="this-is-the-uppnexid",
+            **SAMPLECFG['deliver'])
+        self.assertEquals(deliverer.uppnexid,"this-is-the-uppnexid")
+        self.assertFalse(dbmock.called,
+            "the database should not have been queried")
+        # if an uppnexid is not supplied in the config, the database should be consulted
+        deliverer = deliver.SampleDeliverer(
+            self.projectid,
+            self.sampleid,
+            rootdir=self.casedir,
+            **SAMPLECFG['deliver'])
+        self.assertEquals(deliverer.uppnexid,PROJECTENTRY['uppnex_id'])
+        dbmock.assert_called_once_with(self.projectid)
+
     @mock.patch.object(
         deliver.db.CharonSession,
         'sample_update',
