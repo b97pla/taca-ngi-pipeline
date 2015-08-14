@@ -6,8 +6,8 @@ deliver:
     datapath: data/DATA/_PROJECTID_
     stagingpath: data/STAGING/_PROJECTID_
     deliverypath: data/DELIVERY/_PROJECTID_
-    report: True
-    ngi_node: uppsala
+    report_aggregate: ngi_reports ign_aggregate_report -n uppsala --pandoc_binary
+    report_sample: ngi_reports ign_sample_report -n uppsala --pandoc_binary
     reportpath: _ANALYSISPATH_/piper_ngi
     logpath: _REPORTPATH_/logs
     deliverystatuspath: _REPORTPATH_/08_misc

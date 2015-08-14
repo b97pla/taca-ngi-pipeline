@@ -67,8 +67,6 @@ class Deliverer(object):
             self,'hash_algorithm','sha1')
         self.no_checksum = getattr(
             self,'no_checksum',False)
-        self.ngi_node = getattr(
-            self,'ngi_node','unknown')
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             t = self.uppnexid
@@ -386,12 +384,7 @@ class ProjectDeliverer(Deliverer):
         except AttributeError as e:
              logprefix = None
         with chdir(self.expand_path(self.reportpath)):
-            cl = [
-                "ngi_reports",
-                "ign_aggregate_report",
-                "-n",
-                self.ngi_node
-            ]
+            cl = self.report_aggregate.split(' ')
             call_external_command(
                 cl,
                 with_log_files=(logprefix is not None),
@@ -431,8 +424,17 @@ class ProjectDeliverer(Deliverer):
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
                 self.acknowledge_delivery()
-                logger.info("creating final aggregated report")
-                self.create_report()
+                # create the final aggregate report
+                try:
+                    if self.report_aggregate:
+                        logger.info("creating final aggregate report")
+                        self.create_report()
+                except AttributeError as e:
+                    pass
+                except Exception as e:
+                    logger.warning(
+                        "failed to create final aggregate report for {}, "\
+                        "reason: {}".format(self,e))
             return status
         except (DelivererDatabaseError, DelivererInterruptedError, Exception) as e:
             raise
@@ -471,27 +473,21 @@ class SampleDeliverer(Deliverer):
              logprefix = None
         with chdir(self.expand_path(self.reportpath)):
             # create the ign_sample_report for this sample
-            cl = [
-                "ngi_reports",
-                "ign_sample_report",
-                "-n",
-                self.ngi_node,
-                "--samples",
-                self.sampleid
-            ]
+            cl = self.report_sample.split(' ')
+            cl.extend(["--samples",self.sampleid])
             call_external_command(
                 cl,
                 with_log_files=(logprefix is not None),
                 prefix="{}_sample".format(logprefix))
             # estimate the delivery date for this sample to 0.5 days ahead
-            cl = [
-                "ngi_reports",
-                "ign_aggregate_report",
-                "-n",
-                self.ngi_node,
+            cl = self.report_aggregate.split(' ')
+            cl.extend([
                 "--samples_extra",
-                json.dumps({self.sampleid: {"delivered": _timestamp(days=0.5)}})
-            ]
+                json.dumps({
+                    self.sampleid: {
+                        "delivered": "{}(expected)".format(
+                            _timestamp(days=0.5))}})
+            ])
             call_external_command(
                 cl,
                 with_log_files=(logprefix is not None),
@@ -553,8 +549,8 @@ class SampleDeliverer(Deliverer):
             self.update_delivery_status(status="IN_PROGRESS")
             # an error with the reports should not abort the delivery, so handle
             try:
-                if self.report is True:
-                    logger.info("creating sample report")
+                if self.report_sample and self.report_aggregate:
+                    logger.info("creating sample reports")
                     self.create_report()
             except AttributeError as e:
                 pass
