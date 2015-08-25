@@ -7,6 +7,10 @@ from taca_ngi_pipeline.deliver import deliver as _deliver
 
 logger = logging.getLogger(__name__)
 
+#######################################
+## deliver                           
+#######################################
+
 @click.group()
 @click.pass_context
 @click.option('--deliverypath', type=click.STRING,
@@ -47,7 +51,7 @@ def project(ctx, projectid):
         d = _deliver.ProjectDeliverer(
             pid,
             **ctx.parent.params)
-        _exec_delivery(d,d.deliver_project)
+        _exec_fn(d,d.deliver_project)
     
 ## sample delivery
 @deliver.command()
@@ -62,36 +66,86 @@ def sample(ctx, projectid, sampleid):
             projectid,
             sid,
             **ctx.parent.params)
-        _exec_delivery(d,d.deliver_sample)
+        _exec_fn(d,d.deliver_sample)
+
+
+#######################################
+## clean                           
+#######################################
+
+@click.group()
+@click.pass_context
+@click.option('--operator', type=click.STRING, default=None, multiple=True,
+			  help="Email address to notify operator at. Multiple operators can be specified")
+@click.option('--dry_run', is_flag=True, default=False,
+			  help="Do a dry-run, no files will be affected")
+@click.option('--force', is_flag=True, default=False,
+			  help="Force delivery, even if e.g. analysis has not finished or "\
+                  "sample has not been delivered")
+def clean(ctx,operator,dry_run,force):
+    """ Cleanup methods entry point
+    """
+    if operator is None or len(operator) == 0:
+        del ctx.params['operator']
+    
+# clean subcommands
+        
+## clean project
+@clean.command()
+@click.pass_context
+@click.argument('projectid',type=click.STRING,nargs=-1)
+def project(ctx, projectid):
+    """ Clean the data associated with the specified project
+    """
+    for pid in projectid:
+        d = _deliver.ProjectDeliverer(
+            pid,
+            **ctx.parent.params)
+        _exec_fn(d,d.deliver_project)
+    
+## sample delivery
+@clean.command()
+@click.pass_context
+@click.argument('projectid',type=click.STRING,nargs=1)
+@click.argument('sampleid',type=click.STRING,nargs=-1)
+def sample(ctx, projectid, sampleid):
+    """ Clean the data associated with the specified sample
+    """
+    for sid in sampleid:
+        d = _deliver.SampleDeliverer(
+            projectid,
+            sid,
+            **ctx.parent.params)
+        _exec_fn(d,d.deliver_sample)
 
 # helper function to handle error reporting
-def _exec_delivery(deliver_obj,deliver_fn):
+def _exec_fn(obj,fn):
     try:
-        if deliver_fn():
+        if fn():
             logger.info(
-                "{} delivered successfully".format(str(deliver_obj)))
+                "{} processed successfully".format(str(obj)))
         else:
             logger.info(
-                "{} delivered with some errors, check log".format(
-                    str(deliver_obj)))
+                "{} processed with some errors, check log".format(
+                    str(obj)))
     except Exception as e:
         try:
             send_mail(
-                subject="[ERROR] a delivery failed: {}".format(str(deliver_obj)),
+                subject="[ERROR] processing failed: {}".format(str(obj)),
                 content="Project: {}\nSample: {}\nCommand: {}\n\n"\
                     "Additional information:{}\n".format(
-                        deliver_obj.projectid,
-                        deliver_obj.sampleid,
-                        str(deliver_fn),
+                        obj.projectid,
+                        obj.sampleid,
+                        str(fn),
                         str(e)
                     ),
-                receiver=deliver_obj.config.get('operator'))
+                receiver=obj.config.get('operator'))
         except Exception as me:
             logger.error(
-                "delivering {} failed - reason: {}, but operator {} could not "\
+                "processing {} failed - reason: {}, but operator {} could not "\
                 "be notified - reason: {}".format(
-                    str(deliver_obj),e,deliver_obj.config.get('operator'),me))
+                    str(obj),e,obj.config.get('operator'),me))
         else:
-            logger.error("delivering {} failed - reason: {}, operator {} has been "\
+            logger.error("processing {} failed - reason: {}, operator {} has been "\
                 "notified".format(
-                    str(deliver_obj),str(e),deliver_obj.config.get('operator')))
+                    str(obj),str(e),obj.config.get('operator')))

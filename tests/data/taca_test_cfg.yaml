@@ -67,3 +67,20 @@ deliver:
         - 
             - _ANALYSISPATH_/piper_ngi/07_variant_calls/_SAMPLEID_.clean.dedup.recal.bam.recalibrated.snp.annotated.vcf.idx
             - _STAGINGPATH_/_SAMPLEID_/04-VCF
+
+cleanup:
+    archivepath: data/ARCHIVE/_PROJECTID_
+    paths_to_archive:
+        - data/ANALYSIS/_PROJECTID_
+        - data/DATA/_PROJECTID_
+    files_to_archive:
+        - data/ANALYSIS/_PROJECTID_/piper_ngi/07_variant_calls/_SAMPLEID_.clean.dedup.recal.bam.genomic.vcf
+    file_types_to_remove:
+        - vcf
+        - idx
+        - bam
+        - bai
+        - fastq.gz
+        - recal
+        - intervals
+    

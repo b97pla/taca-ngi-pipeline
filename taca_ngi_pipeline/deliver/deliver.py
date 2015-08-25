@@ -170,7 +170,7 @@ class Deliverer(object):
         dbentry = dbentry or self.db_entry()
         return dbentry.get('delivery_status','NOT_DELIVERED')
 
-    def gather_files(self):
+    def gather_files(self, patterns=[]):
         """ This method will locate files matching the patterns specified in 
             the config and compute the checksum and construct the staging path
             according to the config.
@@ -219,7 +219,7 @@ class Deliverer(object):
                         destpath,
                         os.path.basename(currpath)))
 
-        for sfile, dfile in getattr(self,'files_to_deliver',[]):
+        for sfile, dfile in patterns:
             dest_path = self.expand_path(dfile)
             src_path = self.expand_path(sfile)
             matches = 0
@@ -253,7 +253,8 @@ class Deliverer(object):
         try: 
             with open(digestpath,'w') as dh, open(filelistpath,'w') as fh:
                 agent = transfer.SymlinkAgent(None, None, relative=True)
-                for src, dst, digest in self.gather_files():
+                for src, dst, digest in self.gather_files(
+                    patterns=getattr(self,'files_to_deliver',[])):
                     agent.src_path = src
                     agent.dest_path = dst
                     try:
