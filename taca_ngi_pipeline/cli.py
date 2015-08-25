@@ -2,8 +2,8 @@
 """
 import click
 import logging
-from taca.utils.misc import send_mail
-from taca_ngi_pipeline.deliver import deliver as _deliver
+import taca.utils.misc
+from deliver import deliver as _deliver
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +130,7 @@ def _exec_fn(obj,fn):
                     str(obj)))
     except Exception as e:
         try:
-            send_mail(
+            taca.utils.misc.send_mail(
                 subject="[ERROR] processing failed: {}".format(str(obj)),
                 content="Project: {}\nSample: {}\nCommand: {}\n\n"\
                     "Additional information:{}\n".format(

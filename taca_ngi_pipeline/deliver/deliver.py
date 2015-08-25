@@ -2,24 +2,22 @@
     Module for controlling deliveries of samples and projects
 """
 import datetime
-import glob
 import json
 import logging
 import os
 import re
 import signal
 
-from ngi_pipeline.database import classes as db
-from ngi_pipeline.utils.classes import memoized
 from taca.utils.config import CONFIG
 from taca.utils.filesystem import create_folder, chdir
-from taca.utils.misc import hashfile, call_external_command
+from taca.utils.misc import call_external_command
 from taca.utils import transfer
+from ..utils.filesystem import gather_files as _gather_files
+from ..utils import database as db
 
 logger = logging.getLogger(__name__)
 
 class DelivererError(Exception): pass
-class DelivererDatabaseError(DelivererError): pass
 class DelivererInterruptedError(DelivererError): pass
 class DelivererReplaceError(DelivererError): pass
 class DelivererRsyncError(DelivererError): pass
@@ -74,7 +72,7 @@ class Deliverer(object):
             t = self.uppnexid
         except AttributeError:
             try:
-                t = self.project_entry()['uppnex_id']
+                t = db.project_entry(db.dbcon(), projectid)['uppnex_id']
                 self.uppnexid = t
             except KeyError:
                 pass
@@ -100,53 +98,22 @@ class Deliverer(object):
                 "could not write delivery acknowledgement, reason: {}".format(
                     e))
 
-    @memoized
     def dbcon(self):
         """ Establish a CharonSession
             :returns: a ngi_pipeline.database.classes.CharonSession instance
         """
-        return db.CharonSession()
+        return db.dbcon()
 
     def db_entry(self):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by "\
         "subclass")
 
-    def project_entry(self):
-        """ Fetch a database entry representing the instance's project
-            :returns: a json-formatted database entry
-            :raises DelivererDatabaseError:
-                if an error occurred when communicating with the database
-        """
-        return self.wrap_database_query(
-            self.dbcon().project_get,self.projectid)
-
-    def project_sample_entries(self):
-        """ Fetch the database sample entries representing the instance's project
-            :returns: a list of json-formatted database sample entries
-            :raises DelivererDatabaseError: 
-                if an error occurred when communicating with the database
-        """
-        return self.wrap_database_query(
-            self.dbcon().project_get_samples,self.projectid)
-
     def update_delivery_status(self, *args, **kwargs):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by "\
         "subclass")
     
-    def wrap_database_query(self,query_fn,*query_args,**query_kwargs):
-        """ Wrapper calling the supplied method with the supplied arguments
-            :param query_fn: function reference in the CharonSession class that
-                will be called
-            :returns: the result of the function call
-            :raises DelivererDatabaseError: 
-                if an error occurred when communicating with the database
-        """
-        try:
-            return query_fn(*query_args,**query_kwargs)
-        except db.CharonError as ce:
-            raise DelivererDatabaseError(ce.message)
 
     def get_analysis_status(self, dbentry=None):
         """ Returns the analysis status for this sample. If a sampleentry
@@ -170,7 +137,7 @@ class Deliverer(object):
         dbentry = dbentry or self.db_entry()
         return dbentry.get('delivery_status','NOT_DELIVERED')
 
-    def gather_files(self, patterns=[]):
+    def gather_files(self):
         """ This method will locate files matching the patterns specified in 
             the config and compute the checksum and construct the staging path
             according to the config.
@@ -185,58 +152,9 @@ class Deliverer(object):
                 destination path and the checksum of the source file 
                 (or None if source is a folder)
         """
-        def _get_digest(sourcepath,destpath):
-            digest = None
-            if not self.no_checksum:
-                checksumpath = "{}.{}".format(sourcepath,self.hash_algorithm)
-                try:
-                    with open(checksumpath,'r') as fh:
-                        digest = fh.next()
-                except IOError as re:
-                    digest = hashfile(sourcepath,hasher=self.hash_algorithm)
-                    try:
-                        with open(checksumpath,'w') as fh:
-                            fh.write(digest)
-                    except IOError as we:
-                        logger.warning(
-                            "could not write checksum {} to file {}:" \
-                            " {}".format(digest,checksumpath,we))
-            return (sourcepath,destpath,digest)
-            
-        def _walk_files(currpath, destpath):
-            # if current path is a folder, return all files below it
-            if (os.path.isdir(currpath)):
-                parent = os.path.dirname(currpath)
-                for parentdir,_,dirfiles in os.walk(currpath,followlinks=True):
-                    for currfile in dirfiles:
-                        fullpath = os.path.join(parentdir,currfile)
-                        # the relative path will be used in the destination path
-                        relpath = os.path.relpath(fullpath,parent)
-                        yield (fullpath,os.path.join(destpath,relpath))
-            else:
-                yield (currpath,
-                    os.path.join(
-                        destpath,
-                        os.path.basename(currpath)))
-
-        for sfile, dfile in patterns:
-            dest_path = self.expand_path(dfile)
-            src_path = self.expand_path(sfile)
-            matches = 0
-            for f in glob.iglob(src_path):
-                for spath, dpath in _walk_files(f,dest_path):
-                    # ignore checksum files
-                    if not spath.endswith(".{}".format(self.hash_algorithm)):
-                        matches += 1
-                        # skip and warn if a path does not exist, this includes broken symlinks
-                        if os.path.exists(spath):
-                            yield _get_digest(spath,dpath)
-                        else:
-                            logger.warning("path {} does not exist, possibly " \
-                                "because of a broken symlink".format(spath))
-            if matches == 0:
-                logger.warning("no files matching search expression '{}' "\
-                    "found ".format(src_path))
+        return _gather_files([[self.expand_path(x),self.expand_path(y)] for x, y in self.files_to_deliver],
+                             no_checksum=self.no_checksum,
+                             hash_algorithm=self.hash_algorithm)
 
     def stage_delivery(self):
         """ Stage a delivery by symlinking source paths to destination paths 
@@ -253,8 +171,7 @@ class Deliverer(object):
         try: 
             with open(digestpath,'w') as dh, open(filelistpath,'w') as fh:
                 agent = transfer.SymlinkAgent(None, None, relative=True)
-                for src, dst, digest in self.gather_files(
-                    patterns=getattr(self,'files_to_deliver',[])):
+                for src, dst, digest in self.gather_files():
                     agent.src_path = src
                     agent.dest_path = dst
                     try:
@@ -316,7 +233,6 @@ class Deliverer(object):
                 "{}_{}".format(self.sampleid,
                     datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))))
                 
-    @memoized
     def expand_path(self,path):
         """ Will expand a path by replacing placeholders with correspondingly 
             named attributes belonging to this Deliverer instance. Placeholders
@@ -401,10 +317,10 @@ class ProjectDeliverer(Deliverer):
     def db_entry(self):
         """ Fetch a database entry representing the instance's project
             :returns: a json-formatted database entry
-            :raises DelivererDatabaseError:
+            :raises taca_ngi_pipeline.utils.database.DatabaseError:
                 if an error occurred when communicating with the database
         """
-        return self.project_entry()
+        return db.project_entry(db.dbcon(), self.projectid)
 
     def deliver_project(self):
         """ Deliver all samples in a project to the destination specified by 
@@ -435,20 +351,17 @@ class ProjectDeliverer(Deliverer):
                 logger.info("creating final aggregated report")
                 self.create_report()
             return status
-        except (DelivererDatabaseError, DelivererInterruptedError, Exception) as e:
+        except (db.DatabaseError, DelivererInterruptedError, Exception) as e:
             raise
 
     def update_delivery_status(self, status="DELIVERED"):
         """ Update the delivery_status field in the database to the supplied 
             status for the project specified by this instance
             :returns: the result from the underlying api call
-            :raises DelivererDatabaseError: 
+            :raises taca_ngi_pipeline.utils.database.DatabaseError:
                 if an error occurred when communicating with the database
         """
-        return self.wrap_database_query(
-            self.dbcon().project_update,
-            self.projectid,
-            delivery_status=status)
+        return db.update_project(db.dbcon(), self.projectid, delivery_status=status)
             
 class SampleDeliverer(Deliverer):
     """
@@ -501,11 +414,10 @@ class SampleDeliverer(Deliverer):
     def db_entry(self):
         """ Fetch a database entry representing the instance's project and sample
             :returns: a json-formatted database entry
-            :raises DelivererDatabaseError:
+            :raises taca_ngi_pipeline.utils.database.DatabaseError:
                 if an error occurred when communicating with the database
         """
-        return self.wrap_database_query(
-            self.dbcon().sample_get,self.projectid,self.sampleid)
+        return db.sample_entry(db.dbcon(), self.projectid, self.sampleid)
 
     def deliver_sample(self, sampleentry=None):
         """ Deliver a sample to the destination specified by the config.
@@ -517,7 +429,7 @@ class SampleDeliverer(Deliverer):
                 concurrent processes can update the database at any time
             :returns: True if sample was successfully delivered or was previously
                 delivered, False if sample was not yet ready to be delivered
-            :raises DelivererDatabaseError: if an entry corresponding to this
+            :raises taca_ngi_pipeline.utils.database.DatabaseError: if an entry corresponding to this
                 sample could not be found in the database
             :raises DelivererReplaceError: if a previous delivery of this sample
                 has taken place but should be replaced
@@ -545,7 +457,7 @@ class SampleDeliverer(Deliverer):
                 elif self.get_delivery_status(sampleentry) == 'FAILED':
                     logger.info("retrying delivery of previously failed "\
                     "sample {}".format(str(self)))
-            except DelivererDatabaseError as e:
+            except db.DatabaseError as e:
                 logger.error(
                     "error '{}' occurred during delivery of {}".format(
                         str(e),str(self)))
@@ -616,13 +528,7 @@ class SampleDeliverer(Deliverer):
         """ Update the delivery_status field in the database to the supplied 
             status for the project and sample specified by this instance
             :returns: the result from the underlying api call
-            :raises DelivererDatabaseError: 
+            :raises taca_ngi_pipeline.utils.database.DatabaseError:
                 if an error occurred when communicating with the database
         """
-        return self.wrap_database_query(
-            self.dbcon().sample_update,
-            self.projectid,
-            self.sampleid,
-            delivery_status=status)
-            
-            
+        return db.update_sample(db.dbcon(), self.projectid, self.sampleid, delivery_status=status)
