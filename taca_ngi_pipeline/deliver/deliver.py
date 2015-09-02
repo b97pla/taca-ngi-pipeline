@@ -98,12 +98,6 @@ class Deliverer(object):
                 "could not write delivery acknowledgement, reason: {}".format(
                     e))
 
-    def dbcon(self):
-        """ Establish a CharonSession
-            :returns: a ngi_pipeline.database.classes.CharonSession instance
-        """
-        return db.dbcon()
-
     def db_entry(self):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by "\
@@ -288,7 +282,7 @@ class ProjectDeliverer(Deliverer):
                 delivered, False otherwise
         """
         sampleentries = sampleentries or \
-            self.project_sample_entries().get('samples',[])
+            db.project_sample_entries(db.dbcon(),self.projectid).get('samples',[])
         return all([
             self.get_delivery_status(sentry) == 'DELIVERED' \
             for sentry in sampleentries])

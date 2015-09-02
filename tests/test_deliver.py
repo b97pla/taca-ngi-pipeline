@@ -70,7 +70,7 @@ class TestDeliverer(unittest.TestCase):
     def tearDownClass(self):
         shutil.rmtree(self.rootdir)
 
-    @mock.patch.object(deliver.Deliverer, 'dbcon', autospec=db.CharonSession)
+    @mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession)
     def setUp(self, dbmock):
         self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
         self.projectid = 'NGIU-P001'
@@ -129,8 +129,8 @@ class TestDeliverer(unittest.TestCase):
         return_value="mocked return value")
     def test_wrap_database_query(self, dbmock):
         self.assertEqual(
-            self.deliverer.wrap_database_query(
-                self.deliverer.dbcon().project_create,
+            deliver.db._wrap_database_query(
+                deliver.db.dbcon().project_create,
                 "funarg1",
                 funarg2="funarg2"),
             "mocked return value")
@@ -138,9 +138,9 @@ class TestDeliverer(unittest.TestCase):
             "funarg1",
             funarg2="funarg2")
         dbmock.side_effect = db.CharonError("mocked error")
-        with self.assertRaises(deliver.DelivererDatabaseError):
-            self.deliverer.wrap_database_query(
-                self.deliverer.dbcon().project_create,
+        with self.assertRaises(deliver.db.DatabaseError):
+            deliver.db._wrap_database_query(
+                deliver.db.dbcon().project_create,
                 "funarg1",
                 funarg2="funarg2")
 
@@ -436,7 +436,7 @@ class TestProjectDeliverer(unittest.TestCase):
     def tearDownClass(self):
         shutil.rmtree(self.rootdir)
 
-    @mock.patch.object(deliver.Deliverer, 'dbcon', autospec=db.CharonSession)
+    @mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession)
     def setUp(self, dbmock):
         self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
         self.projectid = 'NGIU-P001'
@@ -503,14 +503,14 @@ class TestProjectDeliverer(unittest.TestCase):
 
     def test_all_samples_delivered(self):
         """ retrieving all_samples_delivered status """
-        with mock.patch.object(deliver.db.CharonSession, 'project_get_samples',
+        with mock.patch.object(deliver.db.db.CharonSession, 'project_get_samples',
                                return_value=PROJECTENTRY) as dbmock:
             self.assertFalse(
                 self.deliverer.all_samples_delivered(),
                 "all samples should not be listed as delivered")
             dbmock.assert_called_with(PROJECTENTRY['projectid'])
         PROJECTENTRY['samples'][0]['delivery_status'] = 'DELIVERED'
-        with mock.patch.object(deliver.db.CharonSession, 'project_get_samples',
+        with mock.patch.object(deliver.db.db.CharonSession, 'project_get_samples',
                                return_value=PROJECTENTRY) as dbmock:
             self.assertTrue(
                 self.deliverer.all_samples_delivered(),
@@ -528,7 +528,7 @@ class TestSampleDeliverer(unittest.TestCase):
     def tearDownClass(self):
         shutil.rmtree(self.rootdir)
 
-    @mock.patch.object(deliver.Deliverer, 'dbcon', autospec=db.CharonSession)
+    @mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession)
     def setUp(self, dbmock):
         self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
         self.projectid = 'NGIU-P001'

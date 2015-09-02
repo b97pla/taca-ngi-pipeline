@@ -69,55 +69,6 @@ def sample(ctx, projectid, sampleid):
         _exec_fn(d,d.deliver_sample)
 
 
-#######################################
-## clean                           
-#######################################
-
-@click.group()
-@click.pass_context
-@click.option('--operator', type=click.STRING, default=None, multiple=True,
-			  help="Email address to notify operator at. Multiple operators can be specified")
-@click.option('--dry_run', is_flag=True, default=False,
-			  help="Do a dry-run, no files will be affected")
-@click.option('--force', is_flag=True, default=False,
-			  help="Force delivery, even if e.g. analysis has not finished or "\
-                  "sample has not been delivered")
-def clean(ctx,operator,dry_run,force):
-    """ Cleanup methods entry point
-    """
-    if operator is None or len(operator) == 0:
-        del ctx.params['operator']
-    
-# clean subcommands
-        
-## clean project
-@clean.command()
-@click.pass_context
-@click.argument('projectid',type=click.STRING,nargs=-1)
-def project(ctx, projectid):
-    """ Clean the data associated with the specified project
-    """
-    for pid in projectid:
-        d = _deliver.ProjectDeliverer(
-            pid,
-            **ctx.parent.params)
-        _exec_fn(d,d.deliver_project)
-    
-## sample delivery
-@clean.command()
-@click.pass_context
-@click.argument('projectid',type=click.STRING,nargs=1)
-@click.argument('sampleid',type=click.STRING,nargs=-1)
-def sample(ctx, projectid, sampleid):
-    """ Clean the data associated with the specified sample
-    """
-    for sid in sampleid:
-        d = _deliver.SampleDeliverer(
-            projectid,
-            sid,
-            **ctx.parent.params)
-        _exec_fn(d,d.deliver_sample)
-
 # helper function to handle error reporting
 def _exec_fn(obj,fn):
     try:

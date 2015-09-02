@@ -40,7 +40,6 @@ setup(name='taca-ngi-pipeline',
     entry_points={
         'taca.subcommands': [
             'deliver = taca_ngi_pipeline.cli:deliver',
-            'clean = taca_ngi_pipeline.cli:clean',
         ]
     },
     install_requires=install_requires,
