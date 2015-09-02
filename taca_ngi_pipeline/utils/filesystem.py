@@ -8,6 +8,14 @@ from taca.utils.misc import hashfile
 logger = getLogger(__name__)
 
 
+class FileNotFoundException(Exception):
+    pass
+
+
+class PatternNotMatchedException(Exception):
+    pass
+
+
 def gather_files(patterns, no_checksum=False, hash_algorithm="md5"):
     """ This method will locate files matching the patterns specified in
         the config and compute the checksum and construct the staging path
@@ -23,34 +31,33 @@ def gather_files(patterns, no_checksum=False, hash_algorithm="md5"):
             destination path and the checksum of the source file
             (or None if source is a folder)
     """
-    def _get_digest(sourcepath,destpath):
+    def _get_digest(sourcepath, destpath, no_digest_cache=False):
         digest = None
         if not no_checksum:
-            checksumpath = "{}.{}".format(sourcepath,hash_algorithm)
+            checksumpath = "{}.{}".format(sourcepath, hash_algorithm)
             try:
-                with open(checksumpath,'r') as fh:
+                with open(checksumpath, 'r') as fh:
                     digest = fh.next()
-            except IOError as re:
-                digest = hashfile(sourcepath,hasher=hash_algorithm)
-                try:
-                    with open(checksumpath,'w') as fh:
-                        fh.write(digest)
-                except IOError as we:
-                    logger.warning(
-                        "could not write checksum {} to file {}:" \
-                        " {}".format(digest,checksumpath,we))
-        return (sourcepath,destpath,digest)
+            except IOError:
+                digest = hashfile(sourcepath, hasher=hash_algorithm)
+                if not no_digest_cache:
+                    try:
+                        with open(checksumpath, 'w') as fh:
+                            fh.write(digest)
+                    except IOError as we:
+                        logger.warning("could not write checksum {} to file {}: {}".format(digest, checksumpath, we))
+        return sourcepath, destpath, digest
 
     def _walk_files(currpath, destpath):
         # if current path is a folder, return all files below it
-        if (path.isdir(currpath)):
+        if path.isdir(currpath):
             parent = path.dirname(currpath)
-            for parentdir,_,dirfiles in walk(currpath,followlinks=True):
+            for parentdir, _, dirfiles in walk(currpath, followlinks=True):
                 for currfile in dirfiles:
-                    fullpath = path.join(parentdir,currfile)
+                    fullpath = path.join(parentdir, currfile)
                     # the relative path will be used in the destination path
-                    relpath = path.relpath(fullpath,parent)
-                    yield (fullpath, path.join(destpath,relpath))
+                    relpath = path.relpath(fullpath, parent)
+                    yield (fullpath, path.join(destpath, relpath))
         else:
             yield (currpath,
                    path.join(
@@ -59,20 +66,32 @@ def gather_files(patterns, no_checksum=False, hash_algorithm="md5"):
 
     if patterns is None:
         patterns = []
-    for sfile, dfile in patterns:
+    for pattern in patterns:
+        sfile, dfile = pattern[0:2]
+        try:
+            extra = pattern[2]
+        except IndexError:
+            extra = {}
         matches = 0
         for f in iglob(sfile):
-            for spath, dpath in _walk_files(f,dfile):
+            for spath, dpath in _walk_files(f, dfile):
                 # ignore checksum files
                 if not spath.endswith(".{}".format(hash_algorithm)):
                     matches += 1
                     # skip and warn if a path does not exist, this includes broken symlinks
                     if path.exists(spath):
-                        yield _get_digest(spath,dpath)
+                        yield _get_digest(spath, dpath, no_digest_cache=extra.get('no_digest_cache', False))
                     else:
-                        logger.warning("path {} does not exist, possibly " \
-                                       "because of a broken symlink".format(spath))
+                        # if the file pattern requires a match, throw an error. otherwise warn
+                        msg = "path {} does not exist, possibly because of a broken symlink".format(spath)
+                        if extra.get('required', False):
+                            logger.error(msg)
+                            raise FileNotFoundException(msg)
+                        logger.warning(msg)
         if matches == 0:
-            logger.warning("no files matching search expression '{}' " \
-                           "found ".format(sfile))
+            msg = "no files matching search expression '{}' found ".format(sfile)
+            if extra.get('required', False):
+                logger.error(msg)
+                raise PatternNotMatchedException(msg)
+            logger.warning(msg)
 

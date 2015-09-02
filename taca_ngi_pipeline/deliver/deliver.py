@@ -12,23 +12,36 @@ from taca.utils.config import CONFIG
 from taca.utils.filesystem import create_folder, chdir
 from taca.utils.misc import call_external_command
 from taca.utils import transfer
-from ..utils.filesystem import gather_files as _gather_files
 from ..utils import database as db
+from ..utils import filesystem as fs
 
 logger = logging.getLogger(__name__)
 
-class DelivererError(Exception): pass
-class DelivererInterruptedError(DelivererError): pass
-class DelivererReplaceError(DelivererError): pass
-class DelivererRsyncError(DelivererError): pass
 
-def _signal_handler(signal, frame):
+class DelivererError(Exception):
+    pass
+
+
+class DelivererInterruptedError(DelivererError):
+    pass
+
+
+class DelivererReplaceError(DelivererError):
+    pass
+
+
+class DelivererRsyncError(DelivererError):
+    pass
+
+
+def _signal_handler(sgnal, frame):
     """ A custom signal handler which will raise a DelivererInterruptedError
         :raises DelivererInterruptedError: 
             this exception will be raised
     """
     raise DelivererInterruptedError(
-        "interrupt signal {} received while delivering".format(signal))
+        "interrupt signal {} received while delivering".format(sgnal))
+
 
 def _timestamp(days=None):
     """Current date and time (UTC) in ISO format, with millisecond precision.
@@ -41,10 +54,12 @@ def _timestamp(days=None):
     instant = instant.isoformat()
     return instant[:-9] + "%06.3f" % float(instant[-9:]) + "Z"
 
+
 class Deliverer(object):
     """ 
         A (abstract) superclass with functionality for handling deliveries
     """
+
     def __init__(self, projectid, sampleid, **kwargs):
         """
             :param string projectid: id of project to deliver
@@ -54,22 +69,28 @@ class Deliverer(object):
                 file checksums, defaults to sha1
         """
         # override configuration options with options given on the command line
-        self.config = CONFIG.get('deliver',{})
+        self.config = CONFIG.get('deliver', {})
         self.config.update(kwargs)
         # set items in the configuration as attributes
         for k, v in self.config.items():
-            setattr(self,k,v)
+            setattr(self, k, v)
         self.projectid = projectid
         self.sampleid = sampleid
-        self.hash_algorithm = getattr(
-            self,'hash_algorithm','sha1')
-        self.no_checksum = getattr(
-            self,'no_checksum',False)
-        self.ngi_node = getattr(
-            self,'ngi_node','unknown')
+        self.hash_algorithm = getattr(self, 'hash_algorithm', 'sha1')
+        self.no_checksum = getattr(self, 'no_checksum', False)
+        self.ngi_node = getattr(self, 'ngi_node', 'unknown')
+        self.files_to_deliver = getattr(self, 'files_to_deliver', None)
+        self.deliverystatuspath = getattr(self, 'deliverystatuspath', None)
+        self.stagingpath = getattr(self, 'stagingpath', None)
+        self.deliverypath = getattr(self, 'deliverypath', None)
+        self.logpath = getattr(self, 'logpath', None)
+        self.reportpath = getattr(self, 'reportpath', None)
+        self.force = getattr(self, 'force', False)
+        self.stage_only = getattr(self, 'stage_only', False)
+
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
-            t = self.uppnexid
+            self.uppnexid
         except AttributeError:
             try:
                 t = db.project_entry(db.dbcon(), projectid)['uppnex_id']
@@ -77,21 +98,21 @@ class Deliverer(object):
             except KeyError:
                 pass
         # set a custom signal handler to intercept interruptions
-        signal.signal(signal.SIGINT,_signal_handler)
-        signal.signal(signal.SIGTERM,_signal_handler)
+        signal.signal(signal.SIGINT, _signal_handler)
+        signal.signal(signal.SIGTERM, _signal_handler)
 
     def __str__(self):
         return "{}:{}".format(
-            self.projectid,self.sampleid) \
+            self.projectid, self.sampleid) \
             if self.sampleid is not None else self.projectid
 
     def acknowledge_delivery(self, tstamp=_timestamp()):
         try:
             ackfile = self.expand_path(
-                os.path.join(self.deliverystatuspath,"{}_delivered.ack".format(
+                os.path.join(self.deliverystatuspath, "{}_delivered.ack".format(
                     self.sampleid or self.projectid)))
             create_folder(os.path.dirname(ackfile))
-            with open(ackfile,'w') as fh:
+            with open(ackfile, 'w') as fh:
                 fh.write("{}\n".format(tstamp))
         except (AttributeError, IOError) as e:
             logger.warning(
@@ -100,14 +121,11 @@ class Deliverer(object):
 
     def db_entry(self):
         """ Abstract method, should be implemented by subclasses """
-        raise NotImplementedError("This method should be implemented by "\
-        "subclass")
+        raise NotImplementedError("This method should be implemented by subclass")
 
     def update_delivery_status(self, *args, **kwargs):
         """ Abstract method, should be implemented by subclasses """
-        raise NotImplementedError("This method should be implemented by "\
-        "subclass")
-    
+        raise NotImplementedError("This method should be implemented by subclass")
 
     def get_analysis_status(self, dbentry=None):
         """ Returns the analysis status for this sample. If a sampleentry
@@ -118,7 +136,7 @@ class Deliverer(object):
             :returns: the analysis status of this sample as a string
         """
         dbentry = dbentry or self.db_entry()
-        return dbentry.get('analysis_status','TO_ANALYZE')
+        return dbentry.get('analysis_status', 'TO_ANALYZE')
 
     def get_delivery_status(self, dbentry=None):
         """ Returns the delivery status for this sample. If a sampleentry
@@ -129,7 +147,7 @@ class Deliverer(object):
             :returns: the delivery status of this sample as a string
         """
         dbentry = dbentry or self.db_entry()
-        return dbentry.get('delivery_status','NOT_DELIVERED')
+        return dbentry.get('delivery_status', 'NOT_DELIVERED')
 
     def gather_files(self):
         """ This method will locate files matching the patterns specified in 
@@ -146,9 +164,9 @@ class Deliverer(object):
                 destination path and the checksum of the source file 
                 (or None if source is a folder)
         """
-        return _gather_files([[self.expand_path(x),self.expand_path(y)] for x, y in self.files_to_deliver],
-                             no_checksum=self.no_checksum,
-                             hash_algorithm=self.hash_algorithm)
+        return fs.gather_files([map(self.expand_path, file_pattern) for file_pattern in self.files_to_deliver],
+                               no_checksum=self.no_checksum,
+                               hash_algorithm=self.hash_algorithm)
 
     def stage_delivery(self):
         """ Stage a delivery by symlinking source paths to destination paths 
@@ -162,8 +180,8 @@ class Deliverer(object):
         digestpath = self.staging_digestfile()
         filelistpath = self.staging_filelist()
         create_folder(os.path.dirname(digestpath))
-        try: 
-            with open(digestpath,'w') as dh, open(filelistpath,'w') as fh:
+        try:
+            with open(digestpath, 'w') as dh, open(filelistpath, 'w') as fh:
                 agent = transfer.SymlinkAgent(None, None, relative=True)
                 for src, dst, digest in self.gather_files():
                     agent.src_path = src
@@ -171,19 +189,16 @@ class Deliverer(object):
                     try:
                         agent.transfer()
                     except (transfer.TransferError, transfer.SymlinkError) as e:
-                        logger.warning("failed to stage file '{}' when "\
-                            "delivering {} - reason: {}".format(
-                                src,str(self),e))
+                        logger.warning("failed to stage file '{}' when "
+                                       "delivering {} - reason: {}".format(src, str(self), e))
 
-                    fpath = os.path.relpath(
-                        dst,
-                        self.expand_path(self.stagingpath))
+                    fpath = os.path.relpath(dst, self.expand_path(self.stagingpath))
                     fh.write("{}\n".format(fpath))
                     if digest is not None:
-                        dh.write("{}  {}\n".format(digest,fpath))
+                        dh.write("{}  {}\n".format(digest, fpath))
                 # finally, include the digestfile in the list of files to deliver
                 fh.write("{}\n".format(os.path.basename(digestpath)))
-        except IOError as e:
+        except (IOError, fs.FileNotFoundException, fs.PatternNotMatchedException) as e:
             raise DelivererError(
                 "failed to stage delivery - reason: {}".format(e))
         return True
@@ -204,7 +219,7 @@ class Deliverer(object):
         return self.expand_path(
             os.path.join(
                 self.stagingpath,
-                "{}.{}".format(self.sampleid,self.hash_algorithm)))
+                "{}.{}".format(self.sampleid, self.hash_algorithm)))
 
     def staging_filelist(self):
         """
@@ -225,18 +240,18 @@ class Deliverer(object):
             os.path.join(
                 self.logpath,
                 "{}_{}".format(self.sampleid,
-                    datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))))
-                
-    def expand_path(self,path):
+                               datetime.datetime.now().strftime("%Y%m%dT%H%M%S"))))
+
+    def expand_path(self, path):
         """ Will expand a path by replacing placeholders with correspondingly 
             named attributes belonging to this Deliverer instance. Placeholders
-            are specified according to the pattern '_[A-Z]_' and the 
+            are specified according to the pattern '<[A-Z]>' and the
             corresponding attribute that will replace the placeholder should be
             identically named but with all lowercase letters.
             
-            For example, "this/is/a/path/to/_PROJECTID_/and/_SAMPLEID_" will
-            expand by substituting _PROJECTID_ with self.projectid and 
-            _SAMPLEID_ with self.sampleid
+            For example, "this/is/a/path/to/<PROJECTID>/and/<SAMPLEID>" will
+            expand by substituting <PROJECTID> with self.projectid and
+            <SAMPLEID> with self.sampleid
             
             If the supplied path does not contain any placeholders or is None,
             it will be returned unchanged.
@@ -248,7 +263,7 @@ class Deliverer(object):
                 placeholder could not be found
         """
         try:
-            m = re.search(r'(_[A-Z]+_)',path)
+            m = re.search(r'(<[A-Z]+>)', path)
         except TypeError:
             return path
         else:
@@ -257,23 +272,23 @@ class Deliverer(object):
             try:
                 expr = m.group(0)
                 return self.expand_path(
-                    path.replace(expr,getattr(self,expr[1:-1].lower())))
+                    path.replace(expr, getattr(self, str(expr[1:-1]).lower())))
             except AttributeError as e:
                 raise DelivererError(
                     "the path '{}' could not be expanded - reason: {}".format(
-                        path,e))
-    
+                        path, e))
+
+
 class ProjectDeliverer(Deliverer):
-    
     def __init__(self, projectid=None, sampleid=None, **kwargs):
-        super(ProjectDeliverer,self).__init__(
+        super(ProjectDeliverer, self).__init__(
             projectid,
             sampleid,
             **kwargs)
-    
+
     def all_samples_delivered(
-        self,
-        sampleentries=None):
+            self,
+            sampleentries=None):
         """ Checks the delivery status of all project samples
 
             :params sampleentries: a list of sample entry dicts to use instead
@@ -281,21 +296,18 @@ class ProjectDeliverer(Deliverer):
             :returns: True if all samples in this project has been successfully
                 delivered, False otherwise
         """
-        sampleentries = sampleentries or \
-            db.project_sample_entries(db.dbcon(),self.projectid).get('samples',[])
-        return all([
-            self.get_delivery_status(sentry) == 'DELIVERED' \
-            for sentry in sampleentries])
+        sampleentries = sampleentries or db.project_sample_entries(db.dbcon(), self.projectid).get('samples', [])
+        return all([self.get_delivery_status(sentry) == 'DELIVERED' for sentry in sampleentries])
 
     def create_report(self):
         """ Create a final aggregate report via a system call """
         logprefix = os.path.abspath(
-            self.expand_path(os.path.join(self.logpath,self.projectid)))
+            self.expand_path(os.path.join(self.logpath, self.projectid)))
         try:
             if not create_folder(os.path.dirname(logprefix)):
                 logprefix = None
-        except AttributeError as e:
-             logprefix = None
+        except AttributeError:
+            logprefix = None
         with chdir(self.expand_path(self.reportpath)):
             cl = [
                 "ngi_reports",
@@ -325,27 +337,28 @@ class ProjectDeliverer(Deliverer):
         """
         try:
             logger.info("Delivering {} to {}".format(
-                str(self),self.expand_path(self.deliverypath)))
+                str(self), self.expand_path(self.deliverypath)))
             if self.get_delivery_status() == 'DELIVERED' \
-                and not self.force:
+                    and not self.force:
                 logger.info("{} has already been delivered".format(str(self)))
                 return True
             # right now, don't catch any errors since we're assuming any thrown 
             # errors needs to be handled by manual intervention
             status = True
-            for sampleid in [sentry['sampleid'] \
-                for sentry in self.project_sample_entries().get('samples',[])]:
-                st = SampleDeliverer(self.projectid,sampleid).deliver_sample()
+            for sampleid in [sentry['sampleid'] for sentry in db.project_sample_entries(
+                    db.dbcon(), self.projectid).get('samples', [])]:
+                st = SampleDeliverer(self.projectid, sampleid).deliver_sample()
                 status = (status and st)
             # query the database whether all samples in the project have been sucessfully delivered
             if self.all_samples_delivered():
-                # this is the only delivery status we want to set on the project level, in order to avoid concurrently running deliveries messing with each other's status updates
+                # this is the only delivery status we want to set on the project level, in order to avoid concurrently
+                # running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
                 self.acknowledge_delivery()
                 logger.info("creating final aggregated report")
                 self.create_report()
             return status
-        except (db.DatabaseError, DelivererInterruptedError, Exception) as e:
+        except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise
 
     def update_delivery_status(self, status="DELIVERED"):
@@ -356,13 +369,15 @@ class ProjectDeliverer(Deliverer):
                 if an error occurred when communicating with the database
         """
         return db.update_project(db.dbcon(), self.projectid, delivery_status=status)
-            
+
+
 class SampleDeliverer(Deliverer):
     """
         A class for handling sample deliveries
     """
+
     def __init__(self, projectid=None, sampleid=None, **kwargs):
-        super(SampleDeliverer,self).__init__(
+        super(SampleDeliverer, self).__init__(
             projectid,
             sampleid,
             **kwargs)
@@ -370,13 +385,13 @@ class SampleDeliverer(Deliverer):
     def create_report(self):
         """ Create a sample report and an aggregate report via a system call """
         logprefix = os.path.abspath(
-            self.expand_path(os.path.join(self.logpath,"{}-{}".format(
-                self.projectid,self.sampleid))))
+            self.expand_path(os.path.join(self.logpath, "{}-{}".format(
+                self.projectid, self.sampleid))))
         try:
             if not create_folder(os.path.dirname(logprefix)):
                 logprefix = None
-        except AttributeError as e:
-             logprefix = None
+        except AttributeError:
+            logprefix = None
         with chdir(self.expand_path(self.reportpath)):
             # create the ign_sample_report for this sample
             cl = [
@@ -432,43 +447,42 @@ class SampleDeliverer(Deliverer):
         # propagate raised errors upwards, they should trigger notification to operator
         try:
             logger.info("Delivering {} to {}".format(
-                str(self),self.expand_path(self.deliverypath)))
+                str(self), self.expand_path(self.deliverypath)))
             try:
                 if self.get_analysis_status(sampleentry) != 'ANALYZED' \
-                    and not self.force:
-                    logger.info("{} has not finished analysis and will not be "\
-                        "delivered".format(str(self)))
+                        and not self.force:
+                    logger.info("{} has not finished analysis and will not be delivered".format(str(self)))
                     return False
                 if self.get_delivery_status(sampleentry) == 'DELIVERED' \
-                    and not self.force:
+                        and not self.force:
                     logger.info("{} has already been delivered".format(str(self)))
                     return True
                 elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
-                    and not self.force:
+                        and not self.force:
                     logger.info("delivery of {} is already in progress".format(
                         str(self)))
                     return False
                 elif self.get_delivery_status(sampleentry) == 'FAILED':
-                    logger.info("retrying delivery of previously failed "\
-                    "sample {}".format(str(self)))
+                    logger.info("retrying delivery of previously failed sample {}".format(str(self)))
             except db.DatabaseError as e:
                 logger.error(
                     "error '{}' occurred during delivery of {}".format(
-                        str(e),str(self)))
+                        str(e), str(self)))
                 raise
-            # set the delivery status to in_progress which will also mean that any concurrent deliveries will leave this sample alone
+            # set the delivery status to in_progress which will also mean that any concurrent deliveries
+            # will leave this sample alone
             self.update_delivery_status(status="IN_PROGRESS")
             # an error with the reports should not abort the delivery, so handle
             try:
                 if self.report is True:
                     logger.info("creating sample report")
                     self.create_report()
-            except AttributeError as e:
+            except AttributeError:
                 pass
             except Exception as e:
                 logger.warning(
                     "failed to create reports for {}, reason: {}".format(
-                        self,e))
+                        self, e))
             # stage the delivery
             if not self.stage_delivery():
                 raise DelivererError("sample was not properly staged")
@@ -483,10 +497,10 @@ class SampleDeliverer(Deliverer):
                 # write a delivery acknowledgement to disk
                 self.acknowledge_delivery()
             return True
-        except DelivererInterruptedError as e:
+        except DelivererInterruptedError:
             self.update_delivery_status(status="NOT DELIVERED")
             raise
-        except Exception as e:
+        except Exception:
             self.update_delivery_status(status="FAILED")
             raise
 
@@ -500,8 +514,8 @@ class SampleDeliverer(Deliverer):
             self.expand_path(self.stagingpath),
             dest_path=self.expand_path(self.deliverypath),
             digestfile=self.delivered_digestfile(),
-            remote_host=getattr(self,'remote_host', None), 
-            remote_user=getattr(self,'remote_user', None), 
+            remote_host=getattr(self, 'remote_host', None),
+            remote_user=getattr(self, 'remote_user', None),
             log=logger,
             opts={
                 '--files-from': [self.staging_filelist()],
@@ -510,7 +524,7 @@ class SampleDeliverer(Deliverer):
                 '--perms': None,
                 '--chmod': 'u+rwX,og-rwx',
                 '--verbose': None,
-                '--exclude': ["*rsync.out","*rsync.err"]
+                '--exclude': ["*rsync.out", "*rsync.err"]
             })
         create_folder(os.path.dirname(self.transfer_log()))
         try:

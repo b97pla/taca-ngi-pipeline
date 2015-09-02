@@ -3,7 +3,8 @@ __author__ = 'Pontus'
 from ngi_pipeline.database import classes as db
 
 
-class DatabaseError(Exception): pass
+class DatabaseError(Exception):
+    pass
 
 
 def _wrap_database_query(query_fn, *query_args, **query_kwargs):
@@ -18,6 +19,7 @@ def _wrap_database_query(query_fn, *query_args, **query_kwargs):
         return query_fn(*query_args, **query_kwargs)
     except db.CharonError as ce:
         raise DatabaseError(ce.message)
+
 
 def dbcon():
     """ Establish a CharonSession

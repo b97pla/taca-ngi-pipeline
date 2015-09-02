@@ -2,6 +2,7 @@
 
 import __builtin__
 import json
+# noinspection PyPackageRequirements
 import mock
 import os
 import shutil
@@ -18,79 +19,76 @@ from taca.utils.transfer import SymlinkError, SymlinkAgent
 
 SAMPLECFG = {
     'deliver': {
-        'analysispath': '_ROOTDIR_/ANALYSIS',
-        'datapath': '_ROOTDIR_/DATA',
-        'stagingpath': '_ROOTDIR_/STAGING',
-        'deliverypath': '_ROOTDIR_/DELIVERY_DESTINATION',
+        'analysispath': '<ROOTDIR>/ANALYSIS',
+        'datapath': '<ROOTDIR>/DATA',
+        'stagingpath': '<ROOTDIR>/STAGING',
+        'deliverypath': '<ROOTDIR>/DELIVERY_DESTINATION',
         'operator': 'operator@domain.com',
-        'logpath': '_ROOTDIR_/ANALYSIS/logs',
-        'reportpath': '_ANALYSISPATH_',
-        'deliverystatuspath': '_ANALYSISPATH_',
+        'logpath': '<ROOTDIR>/ANALYSIS/logs',
+        'reportpath': '<ANALYSISPATH>',
+        'deliverystatuspath': '<ANALYSISPATH>',
         'hash_algorithm': 'md5',
         'files_to_deliver': [
-            ['_ANALYSISPATH_/level0_folder?_file*',
-             '_STAGINGPATH_'],
-            ['_ANALYSISPATH_/level1_folder2',
-             '_STAGINGPATH_'],
-            ['_ANALYSISPATH_/*folder0/*/*_file?',
-             '_STAGINGPATH_'],
-            ['_ANALYSISPATH_/*/_SAMPLEID__folder?_file0',
-             '_STAGINGPATH_'],
-            ['_ANALYSISPATH_/*/*/this-file-does-not-exist',
-             '_STAGINGPATH_'],
-            ['_ANALYSISPATH_/level0_folder0_file0',
-             '_STAGINGPATH_'],
-            ['_DATAPATH_/level1_folder1/level2_folder1/level3_folder1',
-             '_STAGINGPATH_'],
-            ['_DATAPATH_/level1_folder1/level1_folder1_file1.md5',
-             '_STAGINGPATH_'],
+            ['<ANALYSISPATH>/level0_folder?_file*',
+             '<STAGINGPATH>'],
+            ['<ANALYSISPATH>/level1_folder2',
+             '<STAGINGPATH>'],
+            ['<ANALYSISPATH>/*folder0/*/*_file?',
+             '<STAGINGPATH>'],
+            ['<ANALYSISPATH>/*/<SAMPLEID>_folder?_file0',
+             '<STAGINGPATH>'],
+            ['<ANALYSISPATH>/*/*/this-file-does-not-exist',
+             '<STAGINGPATH>'],
+            ['<ANALYSISPATH>/level0_folder0_file0',
+             '<STAGINGPATH>'],
+            ['<DATAPATH>/level1_folder1/level2_folder1/level3_folder1',
+             '<STAGINGPATH>'],
+            ['<DATAPATH>/level1_folder1/level1_folder1_file1.md5',
+             '<STAGINGPATH>'],
         ]}}
 
 SAMPLEENTRY = json.loads(
-    '{"delivery_status": "this-is-the-sample-delivery-status", ' \
-    '"analysis_status": "this-is-the-sample-analysis-status", ' \
+    '{"delivery_status": "this-is-the-sample-delivery-status", '
+    '"analysis_status": "this-is-the-sample-analysis-status", '
     '"sampleid": "NGIU-S001"}')
 PROJECTENTRY = json.loads(
-    '{"delivery_status": "this-is-the-project-delivery-status", ' \
-    '"analysis_status": "this-is-the-project-analysis-status", ' \
-    '"projectid": "NGIU-P001", ' \
+    '{"delivery_status": "this-is-the-project-delivery-status", '
+    '"analysis_status": "this-is-the-project-analysis-status", '
+    '"projectid": "NGIU-P001", '
     '"uppnex_id": "a2099999"}')
 PROJECTENTRY['samples'] = [SAMPLEENTRY]
 
 
 class TestDeliverer(unittest.TestCase):
     @classmethod
-    def setUpClass(self):
-        self.nfolders = 3
-        self.nfiles = 3
-        self.nlevels = 3
-        self.rootdir = tempfile.mkdtemp(prefix="test_taca_deliver_")
+    def setUpClass(cls):
+        cls.nfolders = 3
+        cls.nfiles = 3
+        cls.nlevels = 3
+        cls.rootdir = tempfile.mkdtemp(prefix="test_taca_deliver_")
 
     @classmethod
-    def tearDownClass(self):
-        shutil.rmtree(self.rootdir)
+    def tearDownClass(cls):
+        shutil.rmtree(cls.rootdir, ignore_errors=True)
 
-    @mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession)
-    def setUp(self, dbmock):
-        self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
-        self.projectid = 'NGIU-P001'
-        self.sampleid = 'NGIU-S001'
-        self.dbmock = dbmock
-        self.deliverer = deliver.Deliverer(
-            self.projectid,
-            self.sampleid,
-            rootdir=self.casedir,
-            **SAMPLECFG['deliver'])
-        self.create_content(
-            self.deliverer.expand_path(self.deliverer.analysispath))
-        self.create_content(
-            self.deliverer.expand_path(self.deliverer.datapath))
+    def setUp(self):
+        with mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession) as dbmock:
+            self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
+            self.projectid = 'NGIU-P001'
+            self.sampleid = 'NGIU-S001'
+            self.dbmock = dbmock
+            self.deliverer = deliver.Deliverer(
+                self.projectid,
+                self.sampleid,
+                rootdir=self.casedir,
+                **SAMPLECFG['deliver'])
+            self.create_content(
+                self.deliverer.expand_path(self.deliverer.analysispath))
+            self.create_content(
+                self.deliverer.expand_path(self.deliverer.datapath))
 
     def tearDown(self):
-        try:
-            shutil.rmtree(self.casedir)
-        except:
-            pass
+        shutil.rmtree(self.casedir, ignore_errors=True)
 
     def create_content(self, parentdir, level=0, folder=0):
         if not os.path.exists(parentdir):
@@ -103,7 +101,7 @@ class TestDeliverer(unittest.TestCase):
                 'w').close()
         if level == self.nlevels:
             return
-        level = level + 1
+        level += 1
         for nd in xrange(self.nfolders):
             self.create_content(
                 os.path.join(
@@ -149,7 +147,7 @@ class TestDeliverer(unittest.TestCase):
         expected = [
             os.path.join(
                 self.deliverer.expand_path(self.deliverer.analysispath),
-                "level0_folder0_file{}".format(n)) \
+                "level0_folder0_file{}".format(n))
             for n in xrange(self.nfiles)]
         pattern = SAMPLECFG['deliver']['files_to_deliver'][0]
         self.deliverer.files_to_deliver = [pattern]
@@ -220,7 +218,7 @@ class TestDeliverer(unittest.TestCase):
         os.unlink(checksumfile)
         # assert that the checksum file is created as expected
         for spath, _, exp_checksum in self.deliverer.gather_files():
-            cheksumfile = "{}.{}".format(spath, self.deliverer.hash_algorithm)
+            checksumfile = "{}.{}".format(spath, self.deliverer.hash_algorithm)
             self.assertTrue(os.path.exists(checksumfile),
                             "checksum cache file was not created")
             with open(checksumfile, 'r') as fh:
@@ -228,26 +226,30 @@ class TestDeliverer(unittest.TestCase):
             self.assertEqual(obs_checksum, exp_checksum,
                              "cached and returned checksums did not match")
             os.unlink(checksumfile)
-        # ensure that a thrown IOError when writing checksum cache file is handled gracefully
-        # do a double mock to mask hashfile's call to open builtin
+        exp_checksum = "mocked-digest"
         with mock.patch.object(
-                __builtin__,
-                'open',
-                side_effect=IOError("mocked IOError")) as iomock, mock.patch.object(
-            taca_ngi_pipeline.utils.filesystem,
-            'hashfile',
-            return_value="mocked-digest"
-        ) as digestmock:
+                taca_ngi_pipeline.utils.filesystem, 'hashfile', return_value=exp_checksum):
+            # ensure that a thrown IOError when writing checksum cache file is handled gracefully
+            # mock hashfile's call to open builtin
+            with mock.patch.object(__builtin__, 'open', side_effect=IOError("mocked IOError")) as iomock:
+                for spath, _, obs_checksum in self.deliverer.gather_files():
+                    checksumfile = "{}.{}".format(
+                        spath, self.deliverer.hash_algorithm)
+                    self.assertFalse(os.path.exists(checksumfile),
+                                     "checksum cache file should not have been created")
+                    self.assertTrue(iomock.call_count == 2, "open should have been "
+                                                            "called twice on checksum cache file")
+                    self.assertEqual(
+                        exp_checksum,
+                        obs_checksum, "observed checksum doesn't match expected")
+            # ensure that a digest that shouldn't be cached are not written to file
+            tpat = list(pattern)
+            tpat.append({'no_digest_cache': True})
+            self.deliverer.files_to_deliver = [tpat]
             for spath, _, obs_checksum in self.deliverer.gather_files():
-                cheksumfile = "{}.{}".format(
-                    spath, self.deliverer.hash_algorithm)
-                self.assertFalse(os.path.exists(checksumfile),
-                                 "checksum cache file should not have been created")
-                self.assertTrue(iomock.call_count == 2, "open should have been " \
-                                                        "called twice on checksum cache file")
-                self.assertEqual(
-                    "mocked-digest",
-                    obs_checksum, "observed cheksum doesn't match expected")
+                checksumfile = "{}.{}".format(spath, self.deliverer.hash_algorithm)
+                self.assertFalse(os.path.exists(checksumfile), "checksum cache file should not have been created")
+                self.assertEqual(exp_checksum, obs_checksum, "observed cheksum doesn't match expected")
 
     def test_gather_files7(self):
         """ Traverse folders also if they are symlinks """
@@ -272,12 +274,8 @@ class TestDeliverer(unittest.TestCase):
 
         expected = [os.path.join(dest_path, "level3_folder1_file{}".format(n))
                     for n in xrange(self.nfiles)]
-        expected.extend([
-                            os.path.join(
-                                dest_path,
-                                "level3_folder0",
-                                "level3_folder0_file{}".format(n))
-                            for n in xrange(self.nfiles)])
+        expected.extend([os.path.join(dest_path, "level3_folder0", "level3_folder0_file{}".format(n))
+                         for n in xrange(self.nfiles)])
         pattern = SAMPLECFG['deliver']['files_to_deliver'][6]
         self.deliverer.files_to_deliver = [pattern]
         self.assertItemsEqual(
@@ -308,6 +306,29 @@ class TestDeliverer(unittest.TestCase):
         self.deliverer.files_to_deliver = [pattern]
         observed = [p for p, _, _ in self.deliverer.gather_files()]
         self.assertItemsEqual(observed, expected)
+
+    def test_gather_files10(self):
+        """ A missing required file should throw an error """
+        pattern = list(SAMPLECFG['deliver']['files_to_deliver'][5])
+        pattern.append({'required': True})
+        spath = self.deliverer.expand_path(pattern[0])
+        os.unlink(spath)
+        os.symlink(
+            os.path.join(
+                os.path.dirname(spath),
+                "this-file-does-not-exist"),
+            spath)
+        self.deliverer.files_to_deliver = [pattern]
+        # assert broken symlink raises exception
+        with self.assertRaises(deliver.fs.FileNotFoundException):
+            list(self.deliverer.gather_files())
+        # assert missing file raises exception
+        os.unlink(spath)
+        with self.assertRaises(deliver.fs.PatternNotMatchedException):
+            list(self.deliverer.gather_files())
+        # assert exception not raised if file is not required
+        self.deliverer.files_to_deliver = [pattern[0:2]]
+        self.assertListEqual([], list(self.deliverer.gather_files()), "empty result expected for missing file")
 
     def test_stage_delivery1(self):
         """ The correct folder structure should be created and exceptions 
@@ -368,18 +389,18 @@ class TestDeliverer(unittest.TestCase):
                 self.deliverer.expand_path(self.deliverer.stagingpath),
                 os.path.relpath(
                     os.path.join(d, f),
-                    self.deliverer.expand_path(self.deliverer.analysispath))) \
+                    self.deliverer.expand_path(self.deliverer.analysispath)))
             for d, _, files in os.walk(
                 os.path.join(
                     self.deliverer.expand_path(self.deliverer.analysispath),
-                    "level1_folder2")) \
+                    "level1_folder2"))
             for f in files]
         pattern = SAMPLECFG['deliver']['files_to_deliver'][1]
         self.deliverer.files_to_deliver = [pattern]
         self.deliverer.stage_delivery()
         self.assertItemsEqual(
             [os.path.exists(e) for e in expected],
-            [True for i in xrange(len(expected))])
+            [True for _ in xrange(len(expected))])
 
     def test_expand_path(self):
         """ Paths should expand correctly """
@@ -387,14 +408,14 @@ class TestDeliverer(unittest.TestCase):
             ["this-path-should-not-be-touched",
              "this-path-should-not-be-touched",
              "a path without placeholders was modified"],
-            ["this-path-_SHOULD_-be-touched",
+            ["this-path-<SHOULD>-be-touched",
              "this-path-was-to-be-touched",
              "a path with placeholders was not correctly modified"],
-            ["this-path-_SHOULD_-be-touched-_MULTIPLE_",
+            ["this-path-<SHOULD>-be-touched-<MULTIPLE>",
              "this-path-was-to-be-touched-twice",
              "a path with multiple placeholders was not correctly modified"],
-            ["this-path-should-_not_-be-touched",
-             "this-path-should-_not_-be-touched",
+            ["this-path-should-<not>-be-touched",
+             "this-path-should-<not>-be-touched",
              "a path without valid placeholders was modified"],
             [None, None, "a None path should be handled without exceptions"]]
         self.deliverer.should = 'was-to'
@@ -402,7 +423,7 @@ class TestDeliverer(unittest.TestCase):
         for case, exp, msg in cases:
             self.assertEqual(self.deliverer.expand_path(case), exp, msg)
         with self.assertRaises(deliver.DelivererError):
-            self.deliverer.expand_path("this-path-_WONT_-be-touched")
+            self.deliverer.expand_path("this-path-<WONT>-be-touched")
 
     def test_acknowledge_sample_delivery(self):
         """ A delivery acknowledgement should be written if requirements are met
@@ -429,21 +450,21 @@ class TestDeliverer(unittest.TestCase):
 
 class TestProjectDeliverer(unittest.TestCase):
     @classmethod
-    def setUpClass(self):
-        self.rootdir = tempfile.mkdtemp(prefix="test_taca_deliver_")
+    def setUpClass(cls):
+        cls.rootdir = tempfile.mkdtemp(prefix="test_taca_deliver_")
 
     @classmethod
-    def tearDownClass(self):
-        shutil.rmtree(self.rootdir)
+    def tearDownClass(cls):
+        shutil.rmtree(cls.rootdir, ignore_errors=True)
 
-    @mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession)
-    def setUp(self, dbmock):
-        self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
-        self.projectid = 'NGIU-P001'
-        self.deliverer = deliver.ProjectDeliverer(
-            self.projectid,
-            rootdir=self.casedir,
-            **SAMPLECFG['deliver'])
+    def setUp(self):
+        with mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession):
+            self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
+            self.projectid = 'NGIU-P001'
+            self.deliverer = deliver.ProjectDeliverer(
+                self.projectid,
+                rootdir=self.casedir,
+                **SAMPLECFG['deliver'])
 
     def tearDown(self):
         shutil.rmtree(self.casedir)
@@ -521,26 +542,26 @@ class TestProjectDeliverer(unittest.TestCase):
 
 class TestSampleDeliverer(unittest.TestCase):
     @classmethod
-    def setUpClass(self):
-        self.rootdir = tempfile.mkdtemp(prefix="test_taca_deliver_")
+    def setUpClass(cls):
+        cls.rootdir = tempfile.mkdtemp(prefix="test_taca_deliver_")
 
     @classmethod
-    def tearDownClass(self):
-        shutil.rmtree(self.rootdir)
+    def tearDownClass(cls):
+        shutil.rmtree(cls.rootdir, ignore_errors=True)
 
-    @mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession)
-    def setUp(self, dbmock):
-        self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
-        self.projectid = 'NGIU-P001'
-        self.sampleid = 'NGIU-S001'
-        self.deliverer = deliver.SampleDeliverer(
-            self.projectid,
-            self.sampleid,
-            rootdir=self.casedir,
-            **SAMPLECFG['deliver'])
+    def setUp(self):
+        with mock.patch.object(deliver.db, 'dbcon', autospec=db.CharonSession):
+            self.casedir = tempfile.mkdtemp(prefix="case_", dir=self.rootdir)
+            self.projectid = 'NGIU-P001'
+            self.sampleid = 'NGIU-S001'
+            self.deliverer = deliver.SampleDeliverer(
+                self.projectid,
+                self.sampleid,
+                rootdir=self.casedir,
+                **SAMPLECFG['deliver'])
 
     def tearDown(self):
-        shutil.rmtree(self.casedir)
+        shutil.rmtree(self.casedir, ignore_errors=True)
 
     def test_init(self):
         """ A SampleDeliverer should initiate properly """
@@ -632,7 +653,7 @@ class TestSampleDeliverer(unittest.TestCase):
         create_folder(os.path.dirname(destination))
         self.assertTrue(self.deliverer.do_delivery(), "failed to deliver sample")
         # list the trasferred files relative to the destination
-        observed = [os.path.relpath(os.path.join(d, f), destination) \
+        observed = [os.path.relpath(os.path.join(d, f), destination)
                     for d, _, files in os.walk(destination) for f in files]
         self.assertItemsEqual(observed, expected)
 
