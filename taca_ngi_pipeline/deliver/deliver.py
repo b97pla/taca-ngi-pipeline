@@ -88,7 +88,7 @@ class Deliverer(object):
         self.stage_only = getattr(self, 'stage_only', False)
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
-            self.uppnexid
+            getattr(self, 'uppnexid')
         except AttributeError:
             try:
                 t = db.project_entry(db.dbcon(), projectid)['uppnex_id']
