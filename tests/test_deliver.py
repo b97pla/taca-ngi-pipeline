@@ -27,6 +27,8 @@ SAMPLECFG = {
         'logpath': '<ROOTDIR>/ANALYSIS/logs',
         'reportpath': '<ANALYSISPATH>',
         'deliverystatuspath': '<ANALYSISPATH>',
+        'report_aggregate': 'ngi_reports ign_aggregate_report -n uppsala',
+        'report_sample': 'ngi_reports ign_sample_report -n uppsala',
         'hash_algorithm': 'md5',
         'files_to_deliver': [
             ['<ANALYSISPATH>/level0_folder?_file*',
@@ -539,6 +541,13 @@ class TestProjectDeliverer(unittest.TestCase):
             dbmock.assert_called_with(PROJECTENTRY['projectid'])
         PROJECTENTRY['samples'] = [SAMPLEENTRY]
 
+    def test_create_project_report(self):
+        """ creating the project report """
+        with mock.patch.object(deliver,'call_external_command') as syscall:
+            self.deliverer.create_report()
+            self.assertEqual(
+                " ".join(syscall.call_args[0][0]),
+                SAMPLECFG['deliver']['report_aggregate'])
 
 class TestSampleDeliverer(unittest.TestCase):
     @classmethod
@@ -687,3 +696,17 @@ class TestSampleDeliverer(unittest.TestCase):
             self.deliverer.get_analysis_status(),
             SAMPLEENTRY.get('analysis_status'))
         dbmock.assert_called_with(self.projectid, SAMPLEENTRY.get('sampleid'))
+
+    def test_create_sample_report(self):
+        """ creating the sample report """
+        with mock.patch.object(deliver, 'call_external_command') as syscall:
+            self.deliverer.create_report()
+            self.assertEqual(
+                " ".join(syscall.call_args_list[0][0][0]),
+                "{} --samples {}".format(
+                    SAMPLECFG['deliver']['report_sample'],
+                    self.deliverer.sampleid))
+            self.assertEqual(
+                " ".join(syscall.call_args_list[1][0][0][:-1]),
+                "{} --samples_extra".format(
+                    SAMPLECFG['deliver']['report_aggregate']))
