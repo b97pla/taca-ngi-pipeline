@@ -31,9 +31,10 @@ def gather_files(patterns, no_checksum=False, hash_algorithm="md5"):
             destination path and the checksum of the source file
             (or None if source is a folder)
     """
-    def _get_digest(sourcepath, destpath, no_digest_cache=False):
+    def _get_digest(sourcepath, destpath, no_digest_cache=False, no_digest=False):
         digest = None
-        if not no_checksum:
+        # skip the digest if either the global or the per-file setting is to skip
+        if not any([no_checksum, no_digest]):
             checksumpath = "{}.{}".format(sourcepath, hash_algorithm)
             try:
                 with open(checksumpath, 'r') as fh:
@@ -80,7 +81,11 @@ def gather_files(patterns, no_checksum=False, hash_algorithm="md5"):
                     matches += 1
                     # skip and warn if a path does not exist, this includes broken symlinks
                     if path.exists(spath):
-                        yield _get_digest(spath, dpath, no_digest_cache=extra.get('no_digest_cache', False))
+                        yield _get_digest(
+                            spath,
+                            dpath,
+                            no_digest_cache=extra.get('no_digest_cache', False),
+                            no_digest=extra.get('no_digest', False))
                     else:
                         # if the file pattern requires a match, throw an error. otherwise warn
                         msg = "path {} does not exist, possibly because of a broken symlink".format(spath)

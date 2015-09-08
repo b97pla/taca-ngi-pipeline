@@ -23,6 +23,7 @@ deliver:
             - <STAGINGPATH>/00-Reports
             - required: False
               no_digest_cache: True
+              no_digest: True
         -
             - <ANALYSISPATH>/piper_ngi/delivery/reports/<SAMPLEID>_ign_sample_report.html
             - <STAGINGPATH>/00-Reports

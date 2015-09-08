@@ -252,6 +252,12 @@ class TestDeliverer(unittest.TestCase):
                 checksumfile = "{}.{}".format(spath, self.deliverer.hash_algorithm)
                 self.assertFalse(os.path.exists(checksumfile), "checksum cache file should not have been created")
                 self.assertEqual(exp_checksum, obs_checksum, "observed cheksum doesn't match expected")
+            # ensure that no digest is computed for a file labeled with no_digest
+            tpat = list(pattern)
+            tpat.append({'no_digest': True})
+            self.deliverer.files_to_deliver = [tpat]
+            self.assertTrue(all(map(lambda d: d[2] is None, self.deliverer.gather_files())),
+                            "the digest for files with no_digest=True was computed")
 
     def test_gather_files7(self):
         """ Traverse folders also if they are symlinks """
@@ -549,6 +555,7 @@ class TestProjectDeliverer(unittest.TestCase):
                 " ".join(syscall.call_args[0][0]),
                 SAMPLECFG['deliver']['report_aggregate'])
 
+
 class TestSampleDeliverer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -648,12 +655,11 @@ class TestSampleDeliverer(unittest.TestCase):
                     fpath = os.path.join(curdir, "file{}".format(n))
                     open(fpath, 'w').close()
                     rpath = os.path.relpath(fpath, basedir)
-                    dh.write("{}  {}\n".format(
-                        hashfile(fpath, hasher=self.deliverer.hash_algorithm),
-                        rpath))
+                    digest = hashfile(fpath, hasher=self.deliverer.hash_algorithm)
                     if n < 3:
                         expected.append(rpath)
                         fh.write("{}\n".format(rpath))
+                        dh.write("{}  {}\n".format(digest, rpath))
             rpath = os.path.basename(digestfile)
             expected.append(rpath)
             fh.write("{}\n".format(rpath))
