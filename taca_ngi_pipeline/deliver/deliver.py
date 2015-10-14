@@ -518,7 +518,7 @@ class SampleDeliverer(Deliverer):
                 '--copy-links': None,
                 '--recursive': None,
                 '--perms': None,
-                '--chmod': 'u+rwX,og-rwx',
+                '--chmod': 'ug+rwX,o-rwx',
                 '--verbose': None,
                 '--exclude': ["*rsync.out", "*rsync.err"]
             })
