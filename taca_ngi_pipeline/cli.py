@@ -77,7 +77,7 @@ def mosler(ctx, projectid):
     """ Deliver the specified projects to MOSLER (with capitol letters... MOSLER!!!!!)
     """
     for pid in projectid:
-        d = _deliver_mosler.ProjectDeliverer(
+        d = _deliver_mosler.MoslerProjectDeliverer(
             pid,
             **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
