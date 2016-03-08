@@ -4,6 +4,7 @@ import click
 import logging
 import taca.utils.misc
 from deliver import deliver as _deliver
+from deliver import deliver_mosler as _deliver_mosler
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,20 @@ def sample(ctx, projectid, sampleid):
             sid,
             **ctx.parent.params)
         _exec_fn(d, d.deliver_sample)
+
+# mosler delivery
+# project delivery
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=-1)
+def mosler(ctx, projectid):
+    """ Deliver the specified projects to MOSLER (with capitol letters... MOSLER!!!!!)
+    """
+    for pid in projectid:
+        d = _deliver_mosler.ProjectDeliverer(
+            pid,
+            **ctx.parent.params)
+        _exec_fn(d, d.deliver_project)
 
 
 # helper function to handle error reporting
