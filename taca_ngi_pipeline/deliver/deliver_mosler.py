@@ -2,7 +2,7 @@
     Module for controlling deliveries os samples and projects to Mosler (THE MOSLER!!!!)
 """
 
-
+import paramiko
 
 from deliver import *
 
@@ -52,6 +52,8 @@ class MoslerProjectDeliverer(MoslerDeliverer):
                 any sample was not properly delivered or ready to be delivered
         """
 
+        ### TODO: I need to open here an sft connection
+
         try:
             logger.info("Delivering {} to {}".format(
                 str(self), self.expand_path(self.moslerdeliverypath)))
@@ -69,6 +71,8 @@ class MoslerProjectDeliverer(MoslerDeliverer):
                 st = MoslerSampleDeliverer(self.projectid, sampleid).deliver_sample()
                 status = (status and st)
             # query the database whether all samples in the project have been sucessfully delivered
+            import pdb
+            pdb.set_trace()
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
@@ -191,8 +195,35 @@ class MoslerSampleDeliverer(MoslerDeliverer):
                 transfer
         """
         #tar sample directory
-        #transfer it (maybe an open session is needed)
+        #stolen from http://stackoverflow.com/questions/2032403/how-to-create-full-compressed-tar-file-using-python
+        #import tarfile
+        #tar = tarfile.open("sample.tar.gz", "w:gz")
+        #for name in ["file1", "file2", "file3"]:
+        #    tar.add(name)
+        #tar.close()
         
+        #transfer it (maybe an open session is needed)
+        import pdb
+        pdb.set_trace()
+        host = "mosler.bils.se"
+        try:
+            transport=paramiko.Transport(host)
+            try:
+                password=str(raw_input('Mosler Password:'))
+            except ValueError:
+                print "Not a string"
+            import pdb
+            pdb.set_trace()
+            transport.connect(username = "vezzi", password = password)
+            sftp_client = transport.open_sftp_client()
+            #move to the delivery directory
+            sftp_client.chdir("bils2016002")
+            
+            sftp.put('/home/vezzi/software/taca-ngi-pipeline/requirements.txt', 'requirments.txt')
+            
+            sftp_client.close()
+            transport.close()
+
         import pdb
         pdb.set_trace()
         #delete the tar
