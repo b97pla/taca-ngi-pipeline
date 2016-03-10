@@ -3,6 +3,7 @@
 """
 
 import paramiko
+import getpass
 
 from deliver import *
 
@@ -14,6 +15,8 @@ class MoslerDeliverer(Deliverer):
             sampleid,
             **kwargs)
         self.moslerdeliverypath = getattr(self, 'moslerdeliverypath', None)
+        self.moslersftpserver = getattr(self, 'moslersftpserver', None)
+        self.moslersftpserver_user = getattr(self, 'moslersftpserver_user', None)
 
 
 class MoslerProjectDeliverer(MoslerDeliverer):
@@ -64,12 +67,35 @@ class MoslerProjectDeliverer(MoslerDeliverer):
             # right now, don't catch any errors since we're assuming any thrown 
             # errors needs to be handled by manual intervention
             status = True
+            # Open sftp session with mosler, in this way multiple tranfer will be possible
+            try:
+                transport=paramiko.Transport(self.moslersftpserver)
+                password = getpass.getpass(prompt='Mosler Password for user {}:'.format(self.moslersftpserver_user))
+                transport.connect(username = self.moslersftpserver_user, password = password)
+                sftp_client = transport.open_sftp_client()
+                # move to the delivery directory in the sftp
+                sftp_client.chdir(self.expand_path(self.moslerdeliverypath))
+            except Exception as e:
+                print 'Caught exception: {}: {}'.format(e.__class__, e)
+                raise
+
+
+
             for sampleid in [sentry['sampleid'] for sentry in db.project_sample_entries(
                     db.dbcon(), self.projectid).get('samples', [])]:
                 import pdb
                 pdb.set_trace()
-                st = MoslerSampleDeliverer(self.projectid, sampleid).deliver_sample()
+                # pass to the constructor also the sftp_client object
+                st = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client).deliver_sample()
                 status = (status and st)
+            #now close connection with sftp server
+            try:
+                sftp_client.close()
+                transport.close()
+            except Exception as e:
+                print 'Caught exception: {}: {}'.format(e.__class__, e)
+                raise
+
             # query the database whether all samples in the project have been sucessfully delivered
             import pdb
             pdb.set_trace()
@@ -102,11 +128,12 @@ class MoslerSampleDeliverer(MoslerDeliverer):
         A class for handling sample deliveries to Mosler
     """
 
-    def __init__(self, projectid=None, sampleid=None, **kwargs):
+    def __init__(self, projectid=None, sampleid=None, sftp_client=None, **kwargs):
         super(MoslerSampleDeliverer, self).__init__(
             projectid,
             sampleid,
             **kwargs)
+        self.sftp_client = sftp_client
 
     def deliver_sample(self, sampleentry=None):
         """ Deliver a sample to the destination specified by the config.
@@ -203,27 +230,11 @@ class MoslerSampleDeliverer(MoslerDeliverer):
         #tar.close()
         
         #transfer it (maybe an open session is needed)
-        import pdb
-        pdb.set_trace()
-        host = "mosler.bils.se"
         try:
-            transport=paramiko.Transport(host)
-            try:
-                password=str(raw_input('Mosler Password:'))
-            except ValueError:
-                print "Not a string"
-            import pdb
-            pdb.set_trace()
-            transport.connect(username = "vezzi", password = password)
-            sftp_client = transport.open_sftp_client()
-            #move to the delivery directory
-            sftp_client.chdir("bils2016002")
-            
-            sftp.put('/home/vezzi/software/taca-ngi-pipeline/requirements.txt', 'requirments.txt')
-            
-            sftp_client.close()
-            transport.close()
-
+            self.sftp_client.put('/home/vezzi/software/taca-ngi-pipeline/requirements.txt', 'requirments.txt')
+        except Exception as e:
+            print 'Caught exception: {}: {}'.format(e.__class__, e)
+            raise
         import pdb
         pdb.set_trace()
         #delete the tar

@@ -228,7 +228,7 @@ class Deliverer(object):
             os.path.join(
                 self.stagingpath,
                 "{}.lst".format(self.sampleid)))
-
+ 
     def transfer_log(self):
         """
             :returns: path prefix to the transfer log files. The suffixes will
