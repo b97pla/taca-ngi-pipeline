@@ -4,6 +4,8 @@
 
 import paramiko
 import getpass
+import tarfile
+
 
 from deliver import *
 
@@ -54,9 +56,6 @@ class MoslerProjectDeliverer(MoslerDeliverer):
             :returns: True if all samples were delivered successfully, False if
                 any sample was not properly delivered or ready to be delivered
         """
-
-        ### TODO: I need to open here an sft connection
-
         try:
             logger.info("Delivering {} to {}".format(
                 str(self), self.expand_path(self.moslerdeliverypath)))
@@ -79,15 +78,32 @@ class MoslerProjectDeliverer(MoslerDeliverer):
                 print 'Caught exception: {}: {}'.format(e.__class__, e)
                 raise
 
+            import pdb
+            pdb.set_trace()
+            #memorize all samples that needs to be delivered
+            samples_to_deliver = [sentry['sampleid'] for sentry in db.project_sample_entries(
+                    db.dbcon(), self.projectid).get('samples', [])]
+            while len(samples_to_deliver) > 0:
+                # check how many tar samples I have MAYBE NEED TO CEHCK IF THIS EXISTS...
+                num_tar_files_local = len(glob.glob('{}/*.tar'.format(self.expand_path(self.stagingpath))))
+                # check how many samples there are in mosler sftp server
+                num_tar_files_mosler = sftp_client.listdir('.')
+                # if the sum of ... is less than max_samples_per_time consume the next sample
+                if num_tar_files_local + num_tar_files_mosler < 3:
+                    sampleid = samples_to_deliver.pop()
+                    st = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client).deliver_sample()
+                    status = (status and st) # I need to wait for the last job and then cehck the status....
+                # otherwise wait for 10 minutes and retry
+                else:
+                    time.sleep(600)
 
-
-            for sampleid in [sentry['sampleid'] for sentry in db.project_sample_entries(
-                    db.dbcon(), self.projectid).get('samples', [])]:
-                import pdb
-                pdb.set_trace()
-                # pass to the constructor also the sftp_client object
-                st = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client).deliver_sample()
-                status = (status and st)
+            #for sampleid in [sentry['sampleid'] for sentry in db.project_sample_entries(
+            #        db.dbcon(), self.projectid).get('samples', [])]:
+            #    # pass to the constructor also the sftp_client object
+            #    st = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client).deliver_sample()
+            #    import pdb
+            #    pdb.set_trace()
+            #    status = (status and st)
             #now close connection with sftp server
             try:
                 sftp_client.close()
@@ -202,7 +218,7 @@ class MoslerSampleDeliverer(MoslerDeliverer):
                     raise DelivererError("sample was not properly delivered")
                 logger.info("{} successfully delivered".format(str(self)))
                 # set the delivery status in database
-                self.update_delivery_status()
+                self.update_delivery_status("NOT DELIVERED") ##TODO: revert this to empty, nnow only for convinence
                 # write a delivery acknowledgement to disk
                 self.acknowledge_delivery()
             return True
@@ -221,23 +237,31 @@ class MoslerSampleDeliverer(MoslerDeliverer):
             :raises DelivererTOBEDEFINEDError: if an exception occurred during
                 transfer
         """
-        #tar sample directory
-        #stolen from http://stackoverflow.com/questions/2032403/how-to-create-full-compressed-tar-file-using-python
-        #import tarfile
-        #tar = tarfile.open("sample.tar.gz", "w:gz")
-        #for name in ["file1", "file2", "file3"]:
-        #    tar.add(name)
-        #tar.close()
-        
-        #transfer it (maybe an open session is needed)
+        # tar sample directory before moving it to mosler
+        # stolen from http://stackoverflow.com/questions/2032403/how-to-create-full-compressed-tar-file-using-python
+        # get the folder where tar file will be stored (same as the project delivery)
+        sample_tar_location = self.expand_path(self.stagingpath)
+        # create the tar archve
+        sample_tar_archive = os.path.join(sample_tar_location, "{}.tar".format(self.sampleid))
+        sample_tar = tarfile.open(sample_tar_archive, "w", dereference=True)
+        # add to the archive the directory
+        logger.info("{} building tar file for sample".format(self.sampleid))
+        sample_tar.add('/proj/a2014205/nobackup/NGI/analysis_ready/DELIVERY/P4107/TEST/', arcname="{}".format(self.sampleid))
+        #sample_tar.add(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)), arcname="{}".format(self.sampleid))
+        # close the tar ball
+        logger.info("{} tar file for sample builded".format(self.sampleid))
+        sample_tar.close()
+        # transfer it (maybe an open session is needed)
+        logger.info("{} transferring sample to nestor sftp server".format(self.sampleid))
         try:
-            self.sftp_client.put('/home/vezzi/software/taca-ngi-pipeline/requirements.txt', 'requirments.txt')
+            self.sftp_client.put(sample_tar_archive, "{}.tar".format(self.sampleid))
         except Exception as e:
             print 'Caught exception: {}: {}'.format(e.__class__, e)
             raise
-        import pdb
-        pdb.set_trace()
-        #delete the tar
+        logger.info("{} sample transferred to nestor sftp server".format(self.sampleid))
+        # delete the tar
+        #shutil.rmtree(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)))
+
 
     def db_entry(self):
         """ Fetch a database entry representing the instance's project and sample
