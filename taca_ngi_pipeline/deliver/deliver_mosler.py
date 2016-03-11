@@ -6,7 +6,6 @@ import paramiko
 import getpass
 import tarfile
 
-
 from deliver import *
 
 class MoslerDeliverer(Deliverer):
@@ -71,9 +70,6 @@ class MoslerProjectDeliverer(MoslerDeliverer):
                 transport=paramiko.Transport(self.moslersftpserver)
                 password = getpass.getpass(prompt='Mosler Password for user {}:'.format(self.moslersftpserver_user))
                 transport.connect(username = self.moslersftpserver_user, password = password)
-                sftp_client = transport.open_sftp_client()
-                # move to the delivery directory in the sftp
-                sftp_client.chdir(self.expand_path(self.moslerdeliverypath))
             except Exception as e:
                 print 'Caught exception: {}: {}'.format(e.__class__, e)
                 raise
@@ -83,20 +79,56 @@ class MoslerProjectDeliverer(MoslerDeliverer):
             #memorize all samples that needs to be delivered
             samples_to_deliver = [sentry['sampleid'] for sentry in db.project_sample_entries(
                     db.dbcon(), self.projectid).get('samples', [])]
+            
+            import threading
+            import glob
+            import time
+            # run multiple threads and store return functions
+            # http://stackoverflow.com/questions/6893968/how-to-get-the-return-value-from-a-thread-in-python
+            threads = [None] * len(samples_to_deliver)
+            results = [None] * len(samples_to_deliver)
+            thread  = 0
             while len(samples_to_deliver) > 0:
                 # check how many tar samples I have MAYBE NEED TO CEHCK IF THIS EXISTS...
                 num_tar_files_local = len(glob.glob('{}/*.tar'.format(self.expand_path(self.stagingpath))))
                 # check how many samples there are in mosler sftp server
-                num_tar_files_mosler = sftp_client.listdir('.')
-                # if the sum of ... is less than max_samples_per_time consume the next sample
-                if num_tar_files_local + num_tar_files_mosler < 3:
-                    sampleid = samples_to_deliver.pop()
-                    st = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client).deliver_sample()
-                    status = (status and st) # I need to wait for the last job and then cehck the status....
-                # otherwise wait for 10 minutes and retry
-                else:
-                    time.sleep(600)
+                # create an sftp client for each sample (only one put can be done in one client)
+                sftp_client = transport.open_sftp_client()
+                # move to the delivery directory in the sftp
+                sftp_client.chdir(self.expand_path(self.moslerdeliverypath))
+                # create the deliverer for the sample (pass the sftp_client)
+                num_tar_files_mosler = len(sftp_client.listdir('.'))
+                # if the the numebr of local tar files is higher the the maximum number of deliveries wait
+                if num_tar_files_local >= 3:
+                    print "more than 3 files already tar locally"
+                    sftp_client.close()
+                    time.sleep(30)
+                    continue
+                # if the the number of remote tar files is higher the the maximum number of deliveries wait
+                if num_tar_files_mosler >= 3:
+                    print "more than 3 files in Mosler"
+                    sftp_client.close()
+                    time.sleep(30)
+                    continue
+                # take next sample
+                sampleid = samples_to_deliver.pop()
+                sampleDelivererObj = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client)
+                # initiate the thread and give it the return index
+                threads[thread] = threading.Thread(target=sampleDelivererObj.deliver_sample_thread, args=(None, results, thread))
+                threads[thread].start()
+                #take a nap not need to rush
+                print "delivering sample {}".format(sampleid)
+                time.sleep(10)
+                # increment thread counted
+                thread += 1
+                #st = sampleDelivererObj.deliver_sample()
+                #status = (status and st) # I need to wait for the last job and then cehck the status....
+            
+            for i in range(len(threads)):
+                threads[i].join()
 
+            import pdb
+            pdb.set.trace()
             #for sampleid in [sentry['sampleid'] for sentry in db.project_sample_entries(
             #        db.dbcon(), self.projectid).get('samples', [])]:
             #    # pass to the constructor also the sftp_client object
@@ -106,7 +138,6 @@ class MoslerProjectDeliverer(MoslerDeliverer):
             #    status = (status and st)
             #now close connection with sftp server
             try:
-                sftp_client.close()
                 transport.close()
             except Exception as e:
                 print 'Caught exception: {}: {}'.format(e.__class__, e)
@@ -150,6 +181,10 @@ class MoslerSampleDeliverer(MoslerDeliverer):
             sampleid,
             **kwargs)
         self.sftp_client = sftp_client
+
+    def deliver_sample_thread(self, sampleentry=None, result=None, index=None):
+        result[index] = self.deliver_sample(sampleentry)
+        return None
 
     def deliver_sample(self, sampleentry=None):
         """ Deliver a sample to the destination specified by the config.
@@ -260,7 +295,12 @@ class MoslerSampleDeliverer(MoslerDeliverer):
             raise
         logger.info("{} sample transferred to nestor sftp server".format(self.sampleid))
         # delete the tar
-        #shutil.rmtree(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)))
+        os.remove(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)))
+        # close the sftp client, I will not reuse it anymore
+        self.sftp_client.close()
+        # return True, if something went wrong an exception is thrown before this
+        return True
+
 
 
     def db_entry(self):
