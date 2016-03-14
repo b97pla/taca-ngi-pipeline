@@ -74,7 +74,12 @@ def sample(ctx, projectid, sampleid):
 @click.pass_context
 @click.argument('projectid', type=click.STRING, nargs=-1)
 def mosler(ctx, projectid):
-    """ Deliver the specified projects to MOSLER (with capitol letters... MOSLER!!!!!)
+    """ Deliver the specified projects to MOSLER. Ideally this needs to be used only once when all samples of the project
+        have been sequenced and analysed. mosler subcommand creates a tar file for each sample and moves data to mosler.
+        Mosler password (i.e., user-password and token) need to be inserted once.
+        It is suggested to stage the project locally before deliveing it.
+        If the delivery of the same sample is forced multiple times the user will find multiple directories in the INBOX 
+        folder containing the a tar register with the same name.
     """
     for pid in projectid:
         d = _deliver_mosler.MoslerProjectDeliverer(

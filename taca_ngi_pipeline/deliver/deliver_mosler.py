@@ -5,6 +5,10 @@
 import paramiko
 import getpass
 import tarfile
+import threading
+import glob
+import time
+
 
 from deliver import *
 
@@ -18,6 +22,7 @@ class MoslerDeliverer(Deliverer):
         self.moslerdeliverypath = getattr(self, 'moslerdeliverypath', None)
         self.moslersftpserver = getattr(self, 'moslersftpserver', None)
         self.moslersftpserver_user = getattr(self, 'moslersftpserver_user', None)
+        self.moslersftpmaxfiles = getattr(self, 'moslersftpmaxfiles', None)
 
 
 class MoslerProjectDeliverer(MoslerDeliverer):
@@ -29,6 +34,20 @@ class MoslerProjectDeliverer(MoslerDeliverer):
             projectid,
             sampleid,
             **kwargs)
+    
+    def all_samples_delivered(
+            self,
+            sampleentries=None):
+        """ Checks the delivery status of all project samples
+
+            :params sampleentries: a list of sample entry dicts to use instead
+                of fetching from database
+            :returns: True if all samples in this project has been successfully
+                delivered, False otherwise
+            THIS HAS BEEN COPIED AND PASTED FROM deliver.py ProjectDeliverer class
+        """
+        sampleentries = sampleentries or db.project_sample_entries(db.dbcon(), self.projectid).get('samples', [])
+        return all([self.get_delivery_status(sentry) == 'DELIVERED' for sentry in sampleentries])
     
     def db_entry(self):
         """ Fetch a database entry representing the instance's project
@@ -74,78 +93,46 @@ class MoslerProjectDeliverer(MoslerDeliverer):
                 print 'Caught exception: {}: {}'.format(e.__class__, e)
                 raise
 
-            import pdb
-            pdb.set_trace()
             #memorize all samples that needs to be delivered
             samples_to_deliver = [sentry['sampleid'] for sentry in db.project_sample_entries(
                     db.dbcon(), self.projectid).get('samples', [])]
             
-            import threading
-            import glob
-            import time
             # run multiple threads and store return functions
             # http://stackoverflow.com/questions/6893968/how-to-get-the-return-value-from-a-thread-in-python
             threads = [None] * len(samples_to_deliver)
             results = [None] * len(samples_to_deliver)
             thread  = 0
             while len(samples_to_deliver) > 0:
-                # check how many tar samples I have MAYBE NEED TO CEHCK IF THIS EXISTS...
-                num_tar_files_local = len(glob.glob('{}/*.tar'.format(self.expand_path(self.stagingpath))))
                 # check how many samples there are in mosler sftp server
-                # create an sftp client for each sample (only one put can be done in one client)
+                # create an sftp client for each sample (only one put can be done in one client. This was needed for the threaded version)
                 sftp_client = transport.open_sftp_client()
                 # move to the delivery directory in the sftp
                 sftp_client.chdir(self.expand_path(self.moslerdeliverypath))
-                # create the deliverer for the sample (pass the sftp_client)
+                # Count number of files
                 num_tar_files_mosler = len(sftp_client.listdir('.'))
-                # if the the numebr of local tar files is higher the the maximum number of deliveries wait
-                if num_tar_files_local >= 3:
-                    print "more than 3 files already tar locally"
-                    sftp_client.close()
-                    time.sleep(30)
-                    continue
                 # if the the number of remote tar files is higher the the maximum number of deliveries wait
-                if num_tar_files_mosler >= 3:
-                    print "more than 3 files in Mosler"
+                if num_tar_files_mosler >= self.moslersftpmaxfiles:
+                    logger.info("More than {} files in Mosler sftp server".format(self.moslersftpmaxfiles))
+                    print "more than {} files in Mosler".format(self.moslersftpmaxfiles)
                     sftp_client.close()
-                    time.sleep(30)
+                    # wait 10 minutes
+                    time.sleep(600)
                     continue
-                # take next sample
+                # otherwise take next sample
                 sampleid = samples_to_deliver.pop()
                 sampleDelivererObj = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client)
+                st = sampleDelivererObj.deliver_sample()
                 # initiate the thread and give it the return index
-                threads[thread] = threading.Thread(target=sampleDelivererObj.deliver_sample_thread, args=(None, results, thread))
-                threads[thread].start()
+                #threads[thread] = threading.Thread(target=sampleDelivererObj.deliver_sample_thread, args=(None, results, thread))
+                #threads[thread].start()
                 #take a nap not need to rush
-                print "delivering sample {}".format(sampleid)
-                time.sleep(10)
-                # increment thread counted
-                thread += 1
-                #st = sampleDelivererObj.deliver_sample()
-                #status = (status and st) # I need to wait for the last job and then cehck the status....
-            
-            for i in range(len(threads)):
-                threads[i].join()
-
-            import pdb
-            pdb.set.trace()
-            #for sampleid in [sentry['sampleid'] for sentry in db.project_sample_entries(
-            #        db.dbcon(), self.projectid).get('samples', [])]:
-            #    # pass to the constructor also the sftp_client object
-            #    st = MoslerSampleDeliverer(self.projectid, sampleid, sftp_client).deliver_sample()
-            #    import pdb
-            #    pdb.set_trace()
-            #    status = (status and st)
-            #now close connection with sftp server
+                status = (status and st) # I need to wait for the last job and then cehck the status....
             try:
                 transport.close()
             except Exception as e:
                 print 'Caught exception: {}: {}'.format(e.__class__, e)
                 raise
-
             # query the database whether all samples in the project have been sucessfully delivered
-            import pdb
-            pdb.set_trace()
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
@@ -253,7 +240,7 @@ class MoslerSampleDeliverer(MoslerDeliverer):
                     raise DelivererError("sample was not properly delivered")
                 logger.info("{} successfully delivered".format(str(self)))
                 # set the delivery status in database
-                self.update_delivery_status("NOT DELIVERED") ##TODO: revert this to empty, nnow only for convinence
+                self.update_delivery_status()
                 # write a delivery acknowledgement to disk
                 self.acknowledge_delivery()
             return True
@@ -281,8 +268,8 @@ class MoslerSampleDeliverer(MoslerDeliverer):
         sample_tar = tarfile.open(sample_tar_archive, "w", dereference=True)
         # add to the archive the directory
         logger.info("{} building tar file for sample".format(self.sampleid))
-        sample_tar.add('/proj/a2014205/nobackup/NGI/analysis_ready/DELIVERY/P4107/TEST/', arcname="{}".format(self.sampleid))
-        #sample_tar.add(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)), arcname="{}".format(self.sampleid))
+        #sample_tar.add('/proj/a2014205/nobackup/NGI/analysis_ready/DELIVERY/P4107/TEST/', arcname="{}".format(self.sampleid))
+        sample_tar.add(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)), arcname="{}".format(self.sampleid))
         # close the tar ball
         logger.info("{} tar file for sample builded".format(self.sampleid))
         sample_tar.close()
