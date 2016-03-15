@@ -268,8 +268,9 @@ class MoslerSampleDeliverer(MoslerDeliverer):
         sample_tar = tarfile.open(sample_tar_archive, "w", dereference=True)
         # add to the archive the directory
         logger.info("{} building tar file for sample".format(self.sampleid))
-        #sample_tar.add('/proj/a2014205/nobackup/NGI/analysis_ready/DELIVERY/P4107/TEST/', arcname="{}".format(self.sampleid))
-        sample_tar.add(os.path.join(sample_tar_location,  "{}.tar".format(self.sampleid)), arcname="{}".format(self.sampleid))
+        import pdb
+        pdb.set_trace()
+        sample_tar.add(os.path.join(sample_tar_location,  "{}".format(self.sampleid)), arcname="{}".format(self.sampleid))
         # close the tar ball
         logger.info("{} tar file for sample builded".format(self.sampleid))
         sample_tar.close()
