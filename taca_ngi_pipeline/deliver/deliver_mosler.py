@@ -137,18 +137,7 @@ class MoslerProjectDeliverer(MoslerDeliverer):
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
-                self.acknowledge_delivery()
-                # create the final aggregate report
-                try:
-                    if self.report_aggregate:
-                        logger.info("creating final aggregate report")
-                        self.create_report()
-                except AttributeError as e:
-                    pass
-                except Exception as e:
-                    logger.warning(
-                        "failed to create final aggregate report for {}, "\
-                        "reason: {}".format(self,e))
+                #self.acknowledge_delivery()
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise
@@ -168,6 +157,7 @@ class MoslerSampleDeliverer(MoslerDeliverer):
             sampleid,
             **kwargs)
         self.sftp_client = sftp_client
+
 
     def deliver_sample_thread(self, sampleentry=None, result=None, index=None):
         result[index] = self.deliver_sample(sampleentry)
@@ -218,18 +208,7 @@ class MoslerSampleDeliverer(MoslerDeliverer):
             # set the delivery status to in_progress which will also mean that any concurrent deliveries
             # will leave this sample alone
             self.update_delivery_status(status="IN_PROGRESS")
-            # an error with the reports should not abort the delivery, so handle
             #Skipping report generation for MOSLER.... I have more urgen problems right now....
-            #try:
-            #    if self.report_sample and self.report_aggregate:
-            #        logger.info("creating sample reports")
-            #        self.create_report()
-            #except AttributeError:
-            #    pass
-            #except Exception as e:
-            #    logger.warning(
-            #        "failed to create reports for {}, reason: {}".format(
-            #            self, e))
             # stage the delivery
             if not self.stage_delivery():
                 raise DelivererError("sample was not properly staged")
@@ -242,7 +221,7 @@ class MoslerSampleDeliverer(MoslerDeliverer):
                 # set the delivery status in database
                 self.update_delivery_status()
                 # write a delivery acknowledgement to disk
-                self.acknowledge_delivery()
+                #self.acknowledge_delivery() # not sure what this does for now I silent you
             return True
         except DelivererInterruptedError:
             self.update_delivery_status(status="NOT DELIVERED")
@@ -268,8 +247,6 @@ class MoslerSampleDeliverer(MoslerDeliverer):
         sample_tar = tarfile.open(sample_tar_archive, "w", dereference=True)
         # add to the archive the directory
         logger.info("{} building tar file for sample".format(self.sampleid))
-        import pdb
-        pdb.set_trace()
         sample_tar.add(os.path.join(sample_tar_location,  "{}".format(self.sampleid)), arcname="{}".format(self.sampleid))
         # close the tar ball
         logger.info("{} tar file for sample builded".format(self.sampleid))
