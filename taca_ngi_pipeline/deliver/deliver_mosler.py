@@ -24,6 +24,11 @@ class MoslerProjectDeliverer(ProjectDeliverer):
             projectid,
             sampleid,
             **kwargs)
+        # Mosler specific fields
+        self.moslerdeliverypath = getattr(self, 'moslerdeliverypath', None)
+        self.moslersftpserver = getattr(self, 'moslersftpserver', None)
+        self.moslersftpserver_user = getattr(self, 'moslersftpserver_user', None)
+        self.moslersftpmaxfiles = getattr(self, 'moslersftpmaxfiles', None)
     
 
     def deliver_project(self):
@@ -48,7 +53,7 @@ class MoslerProjectDeliverer(ProjectDeliverer):
                 password = getpass.getpass(prompt='Mosler Password for user {}:'.format(self.moslersftpserver_user))
                 transport.connect(username = self.moslersftpserver_user, password = password)
             except Exception as e:
-                print 'Caught exception: {}: {}'.format(e.__class__, e)
+                logger.error("Caught exception: {}: {}".format(e.__class__, e))
                 raise
 
             #memorize all samples that needs to be delivered
@@ -71,7 +76,6 @@ class MoslerProjectDeliverer(ProjectDeliverer):
                 # if the the number of remote tar files is higher the the maximum number of deliveries wait
                 if num_tar_files_mosler >= self.moslersftpmaxfiles:
                     logger.info("More than {} files in Mosler sftp server".format(self.moslersftpmaxfiles))
-                    print "more than {} files in Mosler".format(self.moslersftpmaxfiles)
                     sftp_client.close()
                     # wait 10 minutes
                     time.sleep(600)
@@ -88,14 +92,14 @@ class MoslerProjectDeliverer(ProjectDeliverer):
             try:
                 transport.close()
             except Exception as e:
-                print 'Caught exception: {}: {}'.format(e.__class__, e)
+                logger.error("Caught exception: {}: {}".format(e.__class__, e))
                 raise
             # query the database whether all samples in the project have been sucessfully delivered
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
-                #self.acknowledge_delivery()
+                self.acknowledge_delivery()
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise

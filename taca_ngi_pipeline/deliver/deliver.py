@@ -86,11 +86,6 @@ class Deliverer(object):
         self.reportpath = getattr(self, 'reportpath', None)
         self.force = getattr(self, 'force', False)
         self.stage_only = getattr(self, 'stage_only', False)
-        # Mosler specific fields
-        self.moslerdeliverypath = getattr(self, 'moslerdeliverypath', None)
-        self.moslersftpserver = getattr(self, 'moslersftpserver', None)
-        self.moslersftpserver_user = getattr(self, 'moslersftpserver_user', None)
-        self.moslersftpmaxfiles = getattr(self, 'moslersftpmaxfiles', None)
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             getattr(self, 'uppnexid')
