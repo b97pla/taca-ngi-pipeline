@@ -4,6 +4,7 @@ import click
 import logging
 import taca.utils.misc
 from deliver import deliver as _deliver
+from deliver import deliver_mosler as _deliver_mosler
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,25 @@ def sample(ctx, projectid, sampleid):
             sid,
             **ctx.parent.params)
         _exec_fn(d, d.deliver_sample)
+
+# mosler delivery
+# project delivery
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=-1)
+def mosler(ctx, projectid):
+    """ Deliver the specified projects to MOSLER. Ideally this needs to be used only once when all samples of the project
+        have been sequenced and analysed. mosler subcommand creates a tar file for each sample and moves data to mosler.
+        Mosler password (i.e., user-password and token) need to be inserted once.
+        It is suggested to stage the project locally before deliveing it.
+        If the delivery of the same sample is forced multiple times the user will find multiple directories in the INBOX 
+        folder containing the a tar register with the same name.
+    """
+    for pid in projectid:
+        d = _deliver_mosler.MoslerProjectDeliverer(
+            pid,
+            **ctx.parent.params)
+        _exec_fn(d, d.deliver_project)
 
 
 # helper function to handle error reporting
