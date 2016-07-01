@@ -8,7 +8,7 @@ before_install:
     - export CHARON_API_TOKEN="charonapitokengoeshere"
     - mkdir /home/travis/.ngipipeline
     - "echo foo: bar > /home/travis/.ngipipeline/ngi_config.yaml"
-
+    - pip install setuptools --upgrade
 install:
     - python setup.py install
 
