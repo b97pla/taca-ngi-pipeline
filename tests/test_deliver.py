@@ -26,6 +26,8 @@ SAMPLECFG = {
         'operator': 'operator@domain.com',
         'logpath': '<ROOTDIR>/ANALYSIS/logs',
         'reportpath': '<ANALYSISPATH>',
+        'copy_reports_to_reports_outbox': 'True',
+        'reports_outbox': '/test/this/path',
         'deliverystatuspath': '<ANALYSISPATH>',
         'report_aggregate': 'ngi_reports ign_aggregate_report -n uppsala',
         'report_sample': 'ngi_reports ign_sample_report -n uppsala',
@@ -46,6 +48,10 @@ SAMPLECFG = {
             ['<DATAPATH>/level1_folder1/level2_folder1/level3_folder1',
              '<STAGINGPATH>'],
             ['<DATAPATH>/level1_folder1/level1_folder1_file1.md5',
+             '<STAGINGPATH>'],
+            ['<DATAPATH>/level1_folder1/level2_folder1/this_aggregate_report.csv',
+             '<STAGINGPATH>'],
+            ['<DATAPATH>/level1_folder1/level2_folder1/version_report.txt',
              '<STAGINGPATH>'],
         ]}}
 
@@ -554,6 +560,29 @@ class TestProjectDeliverer(unittest.TestCase):
             self.assertEqual(
                 " ".join(syscall.call_args[0][0]),
                 SAMPLECFG['deliver']['report_aggregate'])
+
+    def test_copy_project_report(self):
+        """ Copy the project report to the specified report outbox"""
+        with mock.patch.object(shutil, 'copyfile') as syscall:
+
+            report_outbox = SAMPLECFG["deliver"]["reports_outbox"]
+
+            aggregate_report_src = self.deliverer.expand_path("<DATAPATH>/level1_folder1/"
+                                                              "level2_folder1/this_aggregate_report.csv")
+            aggregate_report_target = os.path.join(report_outbox, "this_aggregate_report.csv")
+
+            version_report_src = self.deliverer.expand_path("<DATAPATH>/level1_folder1/"
+                                                            "level2_folder1/version_report.txt")
+            version_report_target = os.path.join(report_outbox, "{}_version_report.txt".format(self.deliverer.projectid))
+
+            expected = [aggregate_report_target, version_report_target]
+
+            actual = self.deliverer.copy_report()
+
+            syscall.assert_any_call(aggregate_report_src, aggregate_report_target)
+            syscall.assert_any_call(version_report_src, version_report_target)
+
+            self.assertListEqual(expected, actual)
 
 
 class TestSampleDeliverer(unittest.TestCase):

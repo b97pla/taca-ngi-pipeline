@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import signal
+import shutil
 
 from taca.utils.config import CONFIG
 from taca.utils.filesystem import create_folder, chdir
@@ -313,6 +314,50 @@ class ProjectDeliverer(Deliverer):
                 with_log_files=(logprefix is not None),
                 prefix="{}_aggregate".format(logprefix))
 
+    def copy_report(self):
+        """ Copies the aggregate report and version reports files to a specified outbox directory.
+            :returns: list of the paths to the files it has copied (i.e. the targets)
+        """
+
+        def find_from_files_to_deliver(pattern):
+            """ Searches the nested list of `files_to_deliver` for files matching the provided pattern
+                :param pattern: the regex pattern to search for
+                :returns: single matching file
+                :raises: AssertionError if there is not strictly one match for the pattern
+            """
+
+            matches = []
+
+            for file_list in self.files_to_deliver:
+                for f in file_list:
+                    if re.match(pattern, f):
+                        matches.append(f)
+
+            if not matches or len(matches) != 1:
+                raise AssertionError("Found none of multiple matches for pattern: {}".format(pattern))
+            else:
+                return matches[0]
+
+        def create_target_path(target_file_name):
+            return self.expand_path(os.path.join(self.config["reports_outbox"], os.path.basename(target_file_name)))
+
+        try:
+            # Find and copy aggregate report file
+            aggregate_report_src = self.expand_path(find_from_files_to_deliver(r".*_aggregate_report.csv$"))
+            aggregate_report_target = create_target_path(aggregate_report_src)
+            shutil.copyfile(aggregate_report_src, aggregate_report_target)
+
+            # Find and copy versions report file
+            version_report_file_src = self.expand_path(find_from_files_to_deliver(r".*/version_report.txt"))
+            version_report_file_target = create_target_path("{}_version_report.txt".format(self.projectid))
+            shutil.copyfile(version_report_file_src, version_report_file_target)
+
+            return [aggregate_report_target, version_report_file_target]
+        except AssertionError as e:
+            logger.error("Had trouble parsing reports from `files_to_deliver` in config.")
+            logger.error(e.message)
+            raise e
+
     def db_entry(self):
         """ Fetch a database entry representing the instance's project
             :returns: a json-formatted database entry
@@ -353,6 +398,7 @@ class ProjectDeliverer(Deliverer):
                     if self.report_aggregate:
                         logger.info("creating final aggregate report")
                         self.create_report()
+                        # TODO Copy reports to OUTBOX
                 except AttributeError as e:
                     pass
                 except Exception as e:
