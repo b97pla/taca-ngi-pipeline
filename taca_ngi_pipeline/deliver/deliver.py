@@ -316,7 +316,7 @@ class ProjectDeliverer(Deliverer):
 
     def copy_report(self):
         """ Copies the aggregate report and version reports files to a specified outbox directory.
-            :returns: list of the paths to the files it has copied (i.e. the targets)
+            :returns: list of the paths to the files it has successfully copied (i.e. the targets)
         """
 
         def find_from_files_to_deliver(pattern):
@@ -341,22 +341,25 @@ class ProjectDeliverer(Deliverer):
         def create_target_path(target_file_name):
             return self.expand_path(os.path.join(self.config["reports_outbox"], os.path.basename(target_file_name)))
 
+        files_copied = []
         try:
             # Find and copy aggregate report file
             aggregate_report_src = self.expand_path(find_from_files_to_deliver(r".*_aggregate_report.csv$"))
             aggregate_report_target = create_target_path(aggregate_report_src)
             shutil.copyfile(aggregate_report_src, aggregate_report_target)
+            files_copied.append(aggregate_report_target)
 
             # Find and copy versions report file
             version_report_file_src = self.expand_path(find_from_files_to_deliver(r".*/version_report.txt"))
             version_report_file_target = create_target_path("{}_version_report.txt".format(self.projectid))
             shutil.copyfile(version_report_file_src, version_report_file_target)
+            files_copied.append(version_report_file_target)
 
-            return [aggregate_report_target, version_report_file_target]
         except AssertionError as e:
             logger.error("Had trouble parsing reports from `files_to_deliver` in config.")
             logger.error(e.message)
-            raise e
+
+        return files_copied
 
     def db_entry(self):
         """ Fetch a database entry representing the instance's project
@@ -398,7 +401,9 @@ class ProjectDeliverer(Deliverer):
                     if self.report_aggregate:
                         logger.info("creating final aggregate report")
                         self.create_report()
-                        # TODO Copy reports to OUTBOX
+                    if self.copy_reports_to_reports_outbox:
+                        logger.info("copying reports to report outbox")
+                        self.copy_report()
                 except AttributeError as e:
                     pass
                 except Exception as e:
