@@ -339,7 +339,8 @@ class ProjectDeliverer(Deliverer):
                 return matches[0]
 
         def create_target_path(target_file_name):
-            return self.expand_path(os.path.join(self.config["reports_outbox"], os.path.basename(target_file_name)))
+            reports_outbox = self.config["reports_outbox"]
+            return self.expand_path(os.path.join(reports_outbox, os.path.basename(target_file_name)))
 
         files_copied = []
         try:
@@ -358,6 +359,9 @@ class ProjectDeliverer(Deliverer):
         except AssertionError as e:
             logger.error("Had trouble parsing reports from `files_to_deliver` in config.")
             logger.error(e.message)
+        except KeyError as e:
+            logger.error("Could not find specified value in config: {}."
+                         "Will not be able to copy the report.".format(e.message))
 
         return files_copied
 
