@@ -400,8 +400,6 @@ class ProjectDeliverer(Deliverer):
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
-                self.update_delivery_status(status="DELIVERED")
-                self.acknowledge_delivery()
                 # create the final aggregate report
                 try:
                     if self.report_aggregate:
@@ -420,6 +418,9 @@ class ProjectDeliverer(Deliverer):
                         self.copy_report()
                 except Exception as e:
                     logger.warning("failed to copy report to report outbox, with reason: {}".format(e.message))
+
+                self.update_delivery_status(status="DELIVERED")
+                self.acknowledge_delivery()
 
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
