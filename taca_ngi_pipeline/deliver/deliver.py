@@ -330,7 +330,9 @@ class ProjectDeliverer(Deliverer):
 
             for file_list in self.files_to_deliver:
                 for f in file_list:
-                    if re.match(pattern, f):
+                    # Check that type is string, since list might also contain
+                    # objects
+                    if type(f) is str and re.match(pattern, f):
                         matches.append(f)
 
             if not matches or len(matches) != 1:
@@ -405,15 +407,20 @@ class ProjectDeliverer(Deliverer):
                     if self.report_aggregate:
                         logger.info("creating final aggregate report")
                         self.create_report()
-                    if self.copy_reports_to_reports_outbox:
-                        logger.info("copying reports to report outbox")
-                        self.copy_report()
                 except AttributeError as e:
                     pass
                 except Exception as e:
                     logger.warning(
                         "failed to create final aggregate report for {}, "\
                         "reason: {}".format(self,e))
+
+                try:
+                    if self.copy_reports_to_reports_outbox:
+                        logger.info("copying reports to report outbox")
+                        self.copy_report()
+                except Exception as e:
+                    logger.warning("failed to copy report to report outbox, with reason: {}".format(e.message))
+
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise

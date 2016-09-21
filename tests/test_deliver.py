@@ -50,7 +50,7 @@ SAMPLECFG = {
             ['<DATAPATH>/level1_folder1/level1_folder1_file1.md5',
              '<STAGINGPATH>'],
             ['<DATAPATH>/level1_folder1/level2_folder1/this_aggregate_report.csv',
-             '<STAGINGPATH>'],
+             '<STAGINGPATH>', {'no_digest_cache': True, 'required': True}],
             ['<DATAPATH>/level1_folder1/level2_folder1/version_report.txt',
              '<STAGINGPATH>'],
         ]}}
