@@ -412,7 +412,7 @@ class ProjectDeliverer(Deliverer):
                 except Exception as e:
                     logger.warning(
                         "failed to create final aggregate report for {}, "\
-                        "reason: {}".format(self,e))
+                        "reason: {}".format(self, e))
 
                 try:
                     if self.copy_reports_to_reports_outbox:
