@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import signal
+import shutil
 
 from taca.utils.config import CONFIG
 from taca.utils.filesystem import create_folder, chdir
@@ -313,6 +314,59 @@ class ProjectDeliverer(Deliverer):
                 with_log_files=(logprefix is not None),
                 prefix="{}_aggregate".format(logprefix))
 
+    def copy_report(self):
+        """ Copies the aggregate report and version reports files to a specified outbox directory.
+            :returns: list of the paths to the files it has successfully copied (i.e. the targets)
+        """
+
+        def find_from_files_to_deliver(pattern):
+            """ Searches the nested list of `files_to_deliver` for files matching the provided pattern
+                :param pattern: the regex pattern to search for
+                :returns: single matching file
+                :raises: AssertionError if there is not strictly one match for the pattern
+            """
+
+            matches = []
+
+            for file_list in self.files_to_deliver:
+                for f in file_list:
+                    # Check that type is string, since list might also contain
+                    # objects
+                    if type(f) is str and re.match(pattern, f):
+                        matches.append(f)
+
+            if not matches or len(matches) != 1:
+                raise AssertionError("Found none of multiple matches for pattern: {}".format(pattern))
+            else:
+                return matches[0]
+
+        def create_target_path(target_file_name):
+            reports_outbox = self.config["reports_outbox"]
+            return self.expand_path(os.path.join(reports_outbox, os.path.basename(target_file_name)))
+
+        files_copied = []
+        try:
+            # Find and copy aggregate report file
+            aggregate_report_src = self.expand_path(find_from_files_to_deliver(r".*_aggregate_report.csv$"))
+            aggregate_report_target = create_target_path(aggregate_report_src)
+            shutil.copyfile(aggregate_report_src, aggregate_report_target)
+            files_copied.append(aggregate_report_target)
+
+            # Find and copy versions report file
+            version_report_file_src = self.expand_path(find_from_files_to_deliver(r".*/version_report.txt"))
+            version_report_file_target = create_target_path("{}_version_report.txt".format(self.projectid))
+            shutil.copyfile(version_report_file_src, version_report_file_target)
+            files_copied.append(version_report_file_target)
+
+        except AssertionError as e:
+            logger.warning("Had trouble parsing reports from `files_to_deliver` in config.")
+            logger.warning(e.message)
+        except KeyError as e:
+            logger.warning("Could not find specified value in config: {}."
+                           "Will not be able to copy the report.".format(e.message))
+
+        return files_copied
+
     def db_entry(self):
         """ Fetch a database entry representing the instance's project
             :returns: a json-formatted database entry
@@ -346,8 +400,6 @@ class ProjectDeliverer(Deliverer):
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
-                self.update_delivery_status(status="DELIVERED")
-                self.acknowledge_delivery()
                 # create the final aggregate report
                 try:
                     if self.report_aggregate:
@@ -358,7 +410,19 @@ class ProjectDeliverer(Deliverer):
                 except Exception as e:
                     logger.warning(
                         "failed to create final aggregate report for {}, "\
-                        "reason: {}".format(self,e))
+                        "reason: {}".format(self, e))
+                    raise e
+
+                try:
+                    if self.copy_reports_to_reports_outbox:
+                        logger.info("copying reports to report outbox")
+                        self.copy_report()
+                except Exception as e:
+                    logger.warning("failed to copy report to report outbox, with reason: {}".format(e.message))
+
+                self.update_delivery_status(status="DELIVERED")
+                self.acknowledge_delivery()
+
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise
