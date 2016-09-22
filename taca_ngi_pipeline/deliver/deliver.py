@@ -359,11 +359,11 @@ class ProjectDeliverer(Deliverer):
             files_copied.append(version_report_file_target)
 
         except AssertionError as e:
-            logger.error("Had trouble parsing reports from `files_to_deliver` in config.")
-            logger.error(e.message)
+            logger.warning("Had trouble parsing reports from `files_to_deliver` in config.")
+            logger.warning(e.message)
         except KeyError as e:
-            logger.error("Could not find specified value in config: {}."
-                         "Will not be able to copy the report.".format(e.message))
+            logger.warning("Could not find specified value in config: {}."
+                           "Will not be able to copy the report.".format(e.message))
 
         return files_copied
 
