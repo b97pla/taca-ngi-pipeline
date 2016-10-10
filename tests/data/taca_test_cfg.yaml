@@ -9,6 +9,8 @@ deliver:
     report_aggregate: ngi_reports ign_aggregate_report -n uppsala --pandoc_binary
     report_sample: ngi_reports ign_sample_report -n uppsala --pandoc_binary
     reportpath: <ANALYSISPATH>/piper_ngi
+    copy_reports_to_reports_outbox: True
+    reports_outbox: /test/this/path
     logpath: <REPORTPATH>/logs
     deliverystatuspath: <REPORTPATH>/08_misc
     operator: operator@domain.com
