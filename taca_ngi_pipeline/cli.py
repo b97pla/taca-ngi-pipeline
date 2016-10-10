@@ -5,6 +5,7 @@ import logging
 import taca.utils.misc
 from deliver import deliver as _deliver
 from deliver import deliver_mosler as _deliver_mosler
+from deliver import deliver_castor as _deliver_castor
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 
 # deliver subcommands
 
-
+# Deliver to Milou or Irma
 # project delivery
 @deliver.command()
 @click.pass_context
@@ -86,6 +87,22 @@ def mosler(ctx, projectid):
             pid,
             **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
+
+#Castor Delivery
+# project delivery
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=-1)
+def castor(ctx, projectid):
+    """ Deliver the specified projects to Bianca wharf.
+    """
+    for pid in projectid:
+        d = _deliver_castor.CastorProjectDeliverer(
+            pid,
+            **ctx.parent.params)
+        _exec_fn(d, d.deliver_project)
+
+
 
 
 # helper function to handle error reporting
