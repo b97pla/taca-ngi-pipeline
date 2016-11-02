@@ -1,10 +1,9 @@
 """ 
-    Module for controlling deliveries os samples and projects to Mosler (THE MOSLER!!!!)
+    Module for controlling deliveries os samples and projects to castor (THE castor!!!!)
 """
 
 import paramiko
 import getpass
-import threading
 import glob
 import time
 
@@ -12,6 +11,19 @@ import time
 from deliver import *
 
 
+## cehcks if a file/folder exists in the remote location
+## http://stackoverflow.com/questions/850749/check-whether-a-path-exists-on-a-remote-host-using-paramiko
+def rexists(sftp, path):
+    """os.path.exists for paramiko's SCP object
+    """
+    try:
+        sftp.stat(path)
+    except IOError, e:
+        if 'No such file' in str(e):
+            return False
+        raise
+    else:
+        return True
 
 
 class CastorProjectDeliverer(ProjectDeliverer):
@@ -22,33 +34,33 @@ class CastorProjectDeliverer(ProjectDeliverer):
             projectid,
             sampleid,
             **kwargs)
-        # Mosler specific fields
-        self.moslerdeliverypath = getattr(self, 'castordeliverypath', None)
-        self.moslersftpserver = getattr(self, 'castorsftpserver', None)
-        self.moslersftpserver_user = getattr(self, 'castorsftpserver_user', None)
+        # castor specific fields
+        self.castordeliverypath = getattr(self, 'castordeliverypath', None)
+        self.castorsftpserver = getattr(self, 'castorsftpserver', None)
+        self.castorsftpserver_user = getattr(self, 'castorsftpserver_user', None)
     
 
     def deliver_project(self):
-        """ Deliver all samples in a project to mosler
+        """ Deliver all samples in a project to castor
             
             :returns: True if all samples were delivered successfully, False if
                 any sample was not properly delivered or ready to be delivered
         """
         try:
             logger.info("Delivering {} to {}".format(
-                str(self), self.expand_path(self.moslerdeliverypath)))
+                str(self), self.expand_path(self.castordeliverypath)))
             if self.get_delivery_status() == 'DELIVERED' \
                     and not self.force:
                 logger.info("{} has already been delivered".format(str(self)))
                 return True
-            # right now, don't catch any errors since we're assuming any thrown 
+            # right now, don't catch any errors since we're assuming any thrown
             # errors needs to be handled by manual intervention
             status = True
-            # Open sftp session with mosler, in this way multiple tranfer will be possible
+            # Open sftp session with castor, in this way multiple tranfer will be possible
             try:
                 transport=paramiko.Transport(self.castorsftpserver)
-                password = getpass.getpass(prompt='Bianca/Castor Password for user {}:'.format(self.moslersftpserver_user))
-                transport.connect(username = self.moslersftpserver_user, password = password)
+                password = getpass.getpass(prompt='Bianca/Castor Password for user {}:'.format(self.castorsftpserver_user))
+                transport.connect(username = "{}-{}".format(self.castorsftpserver_user, self.uppnexid), password = password)
             except Exception as e:
                 logger.error("Caught exception: {}: {}".format(e.__class__, e))
                 raise
@@ -61,7 +73,13 @@ class CastorProjectDeliverer(ProjectDeliverer):
             sftp_client = transport.open_sftp_client()
             # move to the delivery directory in the sftp
             #open one client session and leave it open for all the time of the transfer
-            sftp_client.chdir(self.expand_path(self.moslerdeliverypath))
+            sftp_client.chdir(self.expand_path(self.castordeliverypath))
+            #create the project folder in the remote server
+            if not rexists(sftp_client, self.projectid):
+                sftp_client.mkdir(self.projectid)
+            #move inside the project folder
+            sftp_client.chdir(self.projectid)
+            #now cycle across the samples
             for sampleid in samples_to_deliver:
                 sampleDelivererObj = CastorSampleDeliverer(self.projectid, sampleid, sftp_client)
                 st = sampleDelivererObj.deliver_sample()
@@ -89,11 +107,11 @@ class CastorProjectDeliverer(ProjectDeliverer):
 
 class CastorSampleDeliverer(SampleDeliverer):
     """
-        A class for handling sample deliveries to Mosler
+        A class for handling sample deliveries to castor
     """
 
     def __init__(self, projectid=None, sampleid=None, sftp_client=None, **kwargs):
-        super(MoslerSampleDeliverer, self).__init__(
+        super(CastorSampleDeliverer, self).__init__(
             projectid,
             sampleid,
             **kwargs)
@@ -109,16 +127,37 @@ class CastorSampleDeliverer(SampleDeliverer):
         # transfer it (maybe an open session is needed)
         logger.info("{} transferring sample to castor sftp server".format(self.sampleid))
         try:
-            #http://unix.stackexchange.com/questions/7004/uploading-directories-with-sftp
             #http://stackoverflow.com/questions/4409502/directory-transfers-on-paramiko
-            #
-            #most likely need first to make the dest folder and chnage other stuff but need to wait for bianca to be in place
-            self.sftp_client.put(sample_tar_archive, "{}".format(self.sampleid))
+            #walk through the staging path and recreate the same path in castor and put files there
+            folder_sample = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
+            #create the sample folder
+            if not rexists(self.sftp_client, self.sampleid):
+                self.sftp_client.mkdir(self.sampleid)
+            #move inside the folder
+            self.sftp_client.chdir(self.sampleid)
+            remote_folder_sample = self.sftp_client.getcwd()
+            remote_folder = remote_folder_sample
+            for dirpath, dirnames, filenames in os.walk(folder_sample):
+                import pdb
+                pdb.set_trace()
+                #here us where I ned to find a solution!!!!!
+                prefix_remote_path = dirpath.split(folder_sample)[1]
+                # make remote directory
+                for dir in dirnames:
+                    if not rexists(self.sftp_client, os.path.join(prefix_remote_path, dir)):
+                        self.sftp_client.mkdir( os.path.join(prefix_remote_path, dir) )
+                for filename in filenames:
+                    local_path = os.path.join(dirpath, filename)
+                    self.sftp_client.put(local_path, prefix_remote_path)
+            #we can go back to sample level
+            self.sftp_client.chdir("../")
         except Exception as e:
             print 'Caught exception: {}: {}'.format(e.__class__, e)
             raise
         logger.info("{} sample transferred to castor sftp server".format(self.sampleid))
         # return True, if something went wrong an exception is thrown before this
         return True
+
+
 
 
