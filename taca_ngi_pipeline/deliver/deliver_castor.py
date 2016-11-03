@@ -70,7 +70,8 @@ class CastorProjectDeliverer(ProjectDeliverer):
                     db.dbcon(), self.projectid).get('samples', [])]
             status = True
             #open the sftp client
-            sftp_client = transport.open_sftp_client()
+            #sftp_client = transport.open_sftp_client()
+            sftp_client = MySFTPClient.from_transport(transport)
             # move to the delivery directory in the sftp
             #open one client session and leave it open for all the time of the transfer
             sftp_client.chdir(self.expand_path(self.castordeliverypath))
@@ -129,28 +130,13 @@ class CastorSampleDeliverer(SampleDeliverer):
         try:
             #http://stackoverflow.com/questions/4409502/directory-transfers-on-paramiko
             #walk through the staging path and recreate the same path in castor and put files there
-            folder_sample = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
+            origin_folder_sample = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
             #create the sample folder
             if not rexists(self.sftp_client, self.sampleid):
                 self.sftp_client.mkdir(self.sampleid)
-            #move inside the folder
-            self.sftp_client.chdir(self.sampleid)
-            remote_folder_sample = self.sftp_client.getcwd()
-            remote_folder = remote_folder_sample
-            for dirpath, dirnames, filenames in os.walk(folder_sample):
-                import pdb
-                pdb.set_trace()
-                #here us where I ned to find a solution!!!!!
-                prefix_remote_path = dirpath.split(folder_sample)[1]
-                # make remote directory
-                for dir in dirnames:
-                    if not rexists(self.sftp_client, os.path.join(prefix_remote_path, dir)):
-                        self.sftp_client.mkdir( os.path.join(prefix_remote_path, dir) )
-                for filename in filenames:
-                    local_path = os.path.join(dirpath, filename)
-                    self.sftp_client.put(local_path, prefix_remote_path)
-            #we can go back to sample level
-            self.sftp_client.chdir("../")
+            #now target dir is created
+            targed_dir = self.sampleid
+            self.sftp_client.put_dir(origin_folder_sample ,targed_dir)
         except Exception as e:
             print 'Caught exception: {}: {}'.format(e.__class__, e)
             raise
@@ -158,6 +144,27 @@ class CastorSampleDeliverer(SampleDeliverer):
         # return True, if something went wrong an exception is thrown before this
         return True
 
+###http://stackoverflow.com/questions/4409502/directory-transfers-on-paramiko
+class MySFTPClient(paramiko.SFTPClient):
+    def put_dir(self, source, target):
+        ''' Uploads the contents of the source directory to the target path. The
+            target directory needs to exists. All subdirectories in source are 
+            created under target.
+        '''
+        for item in os.listdir(source):
+            if os.path.isfile(os.path.join(source, item)):
+                self.put(os.path.join(source, item), '%s/%s' % (target, item))
+            else:
+                self.mkdir('%s/%s' % (target, item), ignore_existing=True)
+                self.put_dir(os.path.join(source, item), '%s/%s' % (target, item))
 
-
+    def mkdir(self, path, mode=511, ignore_existing=False):
+        ''' Augments mkdir by adding an option to not fail if the folder exists  '''
+        try:
+            super(MySFTPClient, self).mkdir(path, mode)
+        except IOError:
+            if ignore_existing:
+                pass
+            else:
+                raise
 
