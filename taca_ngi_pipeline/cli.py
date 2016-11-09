@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
               help="Only stage the delivery but do not transfer any files")
 @click.option('--force', is_flag=True, default=False,
               help="Force delivery, even if e.g. analysis has not finished or sample has already been delivered")
-def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force):
+@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca']),
+              help="Specify to which cluster one wants to deliver")
+
+def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster):
     """ Deliver methods entry point
     """
     if deliverypath is None:
@@ -39,7 +42,6 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 
 # deliver subcommands
 
-# Deliver to Milou or Irma
 # project delivery
 @deliver.command()
 @click.pass_context
@@ -47,12 +49,22 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 def project(ctx, projectid):
     """ Deliver the specified projects to the specified destination
     """
+    import pdb
+    pdb.set_trace()
     for pid in projectid:
-        d = _deliver.ProjectDeliverer(
-            pid,
-            **ctx.parent.params)
+        if ctx.parent.params['cluster'] == 'milou':
+            d = _deliver.ProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'mosler':
+            d = _deliver_mosler.MoslerProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'bianca':
+            d = _deliver_castor.CastorProjectDeliverer(
+                pid,
+                **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
-
 
 # sample delivery
 @deliver.command()
@@ -62,47 +74,23 @@ def project(ctx, projectid):
 def sample(ctx, projectid, sampleid):
     """ Deliver the specified sample to the specified destination
     """
-    for sid in sampleid:
-        d = _deliver.SampleDeliverer(
-            projectid,
-            sid,
-            **ctx.parent.params)
-        _exec_fn(d, d.deliver_sample)
-
-# mosler delivery
-# project delivery
-@deliver.command()
-@click.pass_context
-@click.argument('projectid', type=click.STRING, nargs=-1)
-def mosler(ctx, projectid):
-    """ Deliver the specified projects to MOSLER. Ideally this needs to be used only once when all samples of the project
-        have been sequenced and analysed. mosler subcommand creates a tar file for each sample and moves data to mosler.
-        Mosler password (i.e., user-password and token) need to be inserted once.
-        It is suggested to stage the project locally before deliveing it.
-        If the delivery of the same sample is forced multiple times the user will find multiple directories in the INBOX 
-        folder containing the a tar register with the same name.
-    """
     for pid in projectid:
-        d = _deliver_mosler.MoslerProjectDeliverer(
-            pid,
-            **ctx.parent.params)
+        if ctx.parent.params['cluster'] == 'milou':
+            d = _deliver.SampleDeliverer(
+                projectid,
+                sid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'mosler':
+            d = _deliver_mosler.MoslerSampleDeliverer(
+                pid,
+                sid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'bianca':
+            d = _deliver_castor.CastorSampleDeliverer(
+                pid,
+                sid,
+                **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
-
-#Castor Delivery
-# project delivery
-@deliver.command()
-@click.pass_context
-@click.argument('projectid', type=click.STRING, nargs=-1)
-def castor(ctx, projectid):
-    """ Deliver the specified projects to Bianca wharf.
-    """
-    for pid in projectid:
-        d = _deliver_castor.CastorProjectDeliverer(
-            pid,
-            **ctx.parent.params)
-        _exec_fn(d, d.deliver_project)
-
-
 
 
 # helper function to handle error reporting
