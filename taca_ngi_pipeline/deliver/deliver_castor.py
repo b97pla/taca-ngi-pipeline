@@ -56,8 +56,6 @@ class CastorProjectDeliverer(ProjectDeliverer):
             status = True
             #open the sftp client
             sftp_client = MySFTPClient.from_transport(transport)
-            import pdb
-            pdb.set_trace()
             # move to the delivery directory in the sftp
             #open one client session and leave it open for all the time of the transfer
             sftp_client.chdir(self.expand_path(self.castordeliverypath))
