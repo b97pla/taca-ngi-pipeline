@@ -70,7 +70,6 @@ class CastorProjectDeliverer(ProjectDeliverer):
                     db.dbcon(), self.projectid).get('samples', [])]
             status = True
             #open the sftp client
-            #sftp_client = transport.open_sftp_client()
             sftp_client = MySFTPClient.from_transport(transport)
             # move to the delivery directory in the sftp
             #open one client session and leave it open for all the time of the transfer
@@ -85,19 +84,20 @@ class CastorProjectDeliverer(ProjectDeliverer):
                 sampleDelivererObj = CastorSampleDeliverer(self.projectid, sampleid, sftp_client)
                 st = sampleDelivererObj.deliver_sample()
                 status = (status and st)
-            try:
-                transport.close()
-            except Exception as e:
-                logger.error("Caught exception: {}: {}".format(e.__class__, e))
-                raise
-            # close the client
-            self.sftp_client.close()
             # query the database whether all samples in the project have been sucessfully delivered
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
                 # running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
                 self.acknowledge_delivery()
+            try:
+                #now I can close the client
+                sftp_client.close()
+                #and the transport
+                transport.close()
+            except Exception as e:
+                logger.error("Caught exception: {}: {}".format(e.__class__, e))
+                raise
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise
