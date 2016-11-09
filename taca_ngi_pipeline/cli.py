@@ -49,8 +49,6 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 def project(ctx, projectid):
     """ Deliver the specified projects to the specified destination
     """
-    import pdb
-    pdb.set_trace()
     for pid in projectid:
         if ctx.parent.params['cluster'] == 'milou':
             d = _deliver.ProjectDeliverer(
