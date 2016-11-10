@@ -60,7 +60,7 @@ class CastorProjectDeliverer(ProjectDeliverer):
             #open one client session and leave it open for all the time of the transfer
             sftp_client.chdir(self.expand_path(self.castordeliverypath))
             #create the project folder in the remote server
-            sftp_client.mkdir(self.projectid)
+            sftp_client.mkdir(self.projectid, ignore_existing=True)
             #move inside the project folder
             sftp_client.chdir(self.projectid)
             #now cycle across the samples
@@ -116,10 +116,14 @@ class CastorSampleDeliverer(SampleDeliverer):
             #walk through the staging path and recreate the same path in castor and put files there
             origin_folder_sample = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
             #create the sample folder
-            self.sftp_client.mkdir(self.sampleid)
+            self.sftp_client.mkdir(self.sampleid, ignore_existing=True)
             #now target dir is created
             targed_dir = self.sampleid
             self.sftp_client.put_dir(origin_folder_sample ,targed_dir)
+            #now copy the md5
+            source_md5 = os.path.join(self.expand_path(self.stagingpath), "{}.md5".format(self.sampleid))
+            target_md5 = os.path.join(self.sftp_client.getcwd(), "{}.md5".format(self.sampleid))
+            self.sftp_client.put(source_md5, target_md5)
         except Exception as e:
             print 'Caught exception: {}: {}'.format(e.__class__, e)
             raise
@@ -140,7 +144,7 @@ class MySFTPClient(paramiko.SFTPClient):
                 self.remove(os.path.join(target, item))
             else:
                 self.rm_dir(os.path.join(target, item))
-                self.rmdir(os.path.join(target, item))
+        self.rmdir(target)
     
 
     def put_dir(self, source, target):
@@ -153,8 +157,8 @@ class MySFTPClient(paramiko.SFTPClient):
             if os.path.isfile(os.path.join(source, item)):
                 self.put(os.path.join(source, item), "{}/{}".format(target, item))
             else:
-                self.mkdir('%s/%s' % (target, item), ignore_existing=True)
-                self.put_dir(os.path.join(source, item), '%s/%s' % (target, item))
+                self.mkdir("{}/{}".format(target, item), ignore_existing=True)
+                self.put_dir(os.path.join(source, item),"{}/{}".format(target, item))
 
     def mkdir(self, path, mode=511, ignore_existing=False):
         ''' Augments mkdir by adding an option to not fail if the folder exists  '''
