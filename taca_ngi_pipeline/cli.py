@@ -49,6 +49,10 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 def project(ctx, projectid):
     """ Deliver the specified projects to the specified destination
     """
+    if ctx.parent.params['cluster'] == 'bianca':
+        if len(projectid) > 1:
+            logger.error("Only one project can be specified when delivering to Bianca. Specficied {} projects".format(len(projectid)))
+            return 1
     for pid in projectid:
         if ctx.parent.params['cluster'] == 'milou':
             d = _deliver.ProjectDeliverer(
@@ -72,7 +76,17 @@ def project(ctx, projectid):
 def sample(ctx, projectid, sampleid):
     """ Deliver the specified sample to the specified destination
     """
-    for pid in projectid:
+    if ctx.parent.params['cluster'] == 'bianca':
+        #in this case I need to open a sftp connection in order to avoid to insert password everytime
+        projectObj = _deliver_castor.CastorProjectDeliverer(projectid, **ctx.parent.params)
+        projectObj.create_sftp_connnection()
+        #create the project folder in the remote server
+        #move to delivery folder
+        projectObj.sftp_client.chdir('wharf')
+        projectObj.sftp_client.mkdir(projectid, ignore_existing=True)
+        #move inside the project folder
+        projectObj.sftp_client.chdir(projectid)
+    for sid in sampleid:
         if ctx.parent.params['cluster'] == 'milou':
             d = _deliver.SampleDeliverer(
                 projectid,
@@ -80,15 +94,18 @@ def sample(ctx, projectid, sampleid):
                 **ctx.parent.params)
         elif ctx.parent.params['cluster'] == 'mosler':
             d = _deliver_mosler.MoslerSampleDeliverer(
-                pid,
+                projectid,
                 sid,
                 **ctx.parent.params)
         elif ctx.parent.params['cluster'] == 'bianca':
             d = _deliver_castor.CastorSampleDeliverer(
-                pid,
+                projectid,
                 sid,
+                sftp_client=projectObj.sftp_client,
                 **ctx.parent.params)
-        _exec_fn(d, d.deliver_project)
+        _exec_fn(d, d.deliver_sample)
+    if ctx.parent.params['cluster'] == 'bianca':
+        projectObj.close_sftp_connnection()
 
 
 # helper function to handle error reporting

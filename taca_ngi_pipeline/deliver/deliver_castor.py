@@ -24,6 +24,26 @@ class CastorProjectDeliverer(ProjectDeliverer):
         self.castorsftpserver = getattr(self, 'castorsftpserver', None)
         self.castorsftpserver_user = getattr(self, 'castorsftpserver_user', None)
     
+    def create_sftp_connnection(self):
+        try:
+            self.transport=paramiko.Transport(self.castorsftpserver)
+            password = getpass.getpass(prompt='Bianca/Castor Password for user {}:'.format(self.castorsftpserver_user))
+            self.transport.connect(username = "{}-{}".format(self.castorsftpserver_user, self.uppnexid), password = password)
+        except Exception as e:
+            logger.error("Caught exception: {}: {}".format(e.__class__, e))
+            raise
+        #open the sftp client
+        self.sftp_client = MySFTPClient.from_transport(self.transport)
+
+    def close_sftp_connnection(self):
+        try:
+            #now I can close the client
+            self.sftp_client.close()
+            #and the transport
+            self.transport.close()
+        except Exception as e:
+            logger.error("Caught exception: {}: {}".format(e.__class__, e))
+            raise
 
     def deliver_project(self):
         """ Deliver all samples in a project to castor
@@ -38,34 +58,22 @@ class CastorProjectDeliverer(ProjectDeliverer):
                     and not self.force:
                 logger.info("{} has already been delivered".format(str(self)))
                 return True
-            # right now, don't catch any errors since we're assuming any thrown
-            # errors needs to be handled by manual intervention
             status = True
-            # Open sftp session with castor, in this way multiple tranfer will be possible
-            try:
-                transport=paramiko.Transport(self.castorsftpserver)
-                password = getpass.getpass(prompt='Bianca/Castor Password for user {}:'.format(self.castorsftpserver_user))
-                transport.connect(username = "{}-{}".format(self.castorsftpserver_user, self.uppnexid), password = password)
-            except Exception as e:
-                logger.error("Caught exception: {}: {}".format(e.__class__, e))
-                raise
-
+            #open one client session and leave it open for all the time of the transfer
+            self.create_sftp_connnection()
             #memorize all samples that needs to be delivered
             samples_to_deliver = [sentry['sampleid'] for sentry in db.project_sample_entries(
                     db.dbcon(), self.projectid).get('samples', [])]
             status = True
-            #open the sftp client
-            sftp_client = MySFTPClient.from_transport(transport)
             # move to the delivery directory in the sftp
-            #open one client session and leave it open for all the time of the transfer
-            sftp_client.chdir(self.expand_path(self.castordeliverypath))
+            self.sftp_client.chdir(self.expand_path(self.castordeliverypath))
             #create the project folder in the remote server
-            sftp_client.mkdir(self.projectid, ignore_existing=True)
+            self.sftp_client.mkdir(self.projectid, ignore_existing=True)
             #move inside the project folder
-            sftp_client.chdir(self.projectid)
+            self.sftp_client.chdir(self.projectid)
             #now cycle across the samples
             for sampleid in samples_to_deliver:
-                sampleDelivererObj = CastorSampleDeliverer(self.projectid, sampleid, sftp_client)
+                sampleDelivererObj = CastorSampleDeliverer(self.projectid, sampleid, self.sftp_client)
                 st = sampleDelivererObj.deliver_sample()
                 status = (status and st)
             # query the database whether all samples in the project have been sucessfully delivered
@@ -74,14 +82,8 @@ class CastorProjectDeliverer(ProjectDeliverer):
                 # running deliveries messing with each other's status updates
                 self.update_delivery_status(status="DELIVERED")
                 self.acknowledge_delivery()
-            try:
-                #now I can close the client
-                sftp_client.close()
-                #and the transport
-                transport.close()
-            except Exception as e:
-                logger.error("Caught exception: {}: {}".format(e.__class__, e))
-                raise
+            #close connection
+            self.close_sftp_connnection()
             return status
         except (db.DatabaseError, DelivererInterruptedError, Exception):
             raise
@@ -130,6 +132,9 @@ class CastorSampleDeliverer(SampleDeliverer):
         logger.info("{} sample transferred to castor sftp server".format(self.sampleid))
         # return True, if something went wrong an exception is thrown before this
         return True
+
+
+
 
 ###http://stackoverflow.com/questions/4409502/directory-transfers-on-paramiko
 class MySFTPClient(paramiko.SFTPClient):
