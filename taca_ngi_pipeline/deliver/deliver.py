@@ -535,6 +535,8 @@ class SampleDeliverer(Deliverer):
                     return False
                 elif self.get_sample_status(sampleentry) == 'ABORTED':
                     logger.info("{} has been marked as ABORTED and will not be delivered".format(str(self)))
+                    #set it to delivered as ABORTED samples should not fail the status of a project
+                    self.update_delivery_status(status="DELIVERED")
                     return True
                 elif self.get_sample_status(sampleentry) == 'FRESH' \
                         and not self.force:

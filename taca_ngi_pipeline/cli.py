@@ -82,7 +82,7 @@ def sample(ctx, projectid, sampleid):
         projectObj.create_sftp_connnection()
         #create the project folder in the remote server
         #move to delivery folder
-        projectObj.sftp_client.chdir('wharf')
+        projectObj.sftp_client.chdir(projectObj.config.get('castordeliverypath', '/wharf'))
         projectObj.sftp_client.mkdir(projectid, ignore_existing=True)
         #move inside the project folder
         projectObj.sftp_client.chdir(projectid)
