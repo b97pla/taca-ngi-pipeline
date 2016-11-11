@@ -5,6 +5,7 @@ import logging
 import taca.utils.misc
 from deliver import deliver as _deliver
 from deliver import deliver_mosler as _deliver_mosler
+from deliver import deliver_castor as _deliver_castor
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,10 @@ logger = logging.getLogger(__name__)
               help="Only stage the delivery but do not transfer any files")
 @click.option('--force', is_flag=True, default=False,
               help="Force delivery, even if e.g. analysis has not finished or sample has already been delivered")
-def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force):
+@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca']),
+              help="Specify to which cluster one wants to deliver")
+
+def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster):
     """ Deliver methods entry point
     """
     if deliverypath is None:
@@ -38,7 +42,6 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 
 # deliver subcommands
 
-
 # project delivery
 @deliver.command()
 @click.pass_context
@@ -46,12 +49,24 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 def project(ctx, projectid):
     """ Deliver the specified projects to the specified destination
     """
+    if ctx.parent.params['cluster'] == 'bianca':
+        if len(projectid) > 1:
+            logger.error("Only one project can be specified when delivering to Bianca. Specficied {} projects".format(len(projectid)))
+            return 1
     for pid in projectid:
-        d = _deliver.ProjectDeliverer(
-            pid,
-            **ctx.parent.params)
+        if ctx.parent.params['cluster'] == 'milou':
+            d = _deliver.ProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'mosler':
+            d = _deliver_mosler.MoslerProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'bianca':
+            d = _deliver_castor.CastorProjectDeliverer(
+                pid,
+                **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
-
 
 # sample delivery
 @deliver.command()
@@ -61,31 +76,36 @@ def project(ctx, projectid):
 def sample(ctx, projectid, sampleid):
     """ Deliver the specified sample to the specified destination
     """
+    if ctx.parent.params['cluster'] == 'bianca':
+        #in this case I need to open a sftp connection in order to avoid to insert password everytime
+        projectObj = _deliver_castor.CastorProjectDeliverer(projectid, **ctx.parent.params)
+        projectObj.create_sftp_connnection()
+        #create the project folder in the remote server
+        #move to delivery folder
+        projectObj.sftp_client.chdir(projectObj.config.get('castordeliverypath', '/wharf'))
+        projectObj.sftp_client.mkdir(projectid, ignore_existing=True)
+        #move inside the project folder
+        projectObj.sftp_client.chdir(projectid)
     for sid in sampleid:
-        d = _deliver.SampleDeliverer(
-            projectid,
-            sid,
-            **ctx.parent.params)
+        if ctx.parent.params['cluster'] == 'milou':
+            d = _deliver.SampleDeliverer(
+                projectid,
+                sid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'mosler':
+            d = _deliver_mosler.MoslerSampleDeliverer(
+                projectid,
+                sid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'bianca':
+            d = _deliver_castor.CastorSampleDeliverer(
+                projectid,
+                sid,
+                sftp_client=projectObj.sftp_client,
+                **ctx.parent.params)
         _exec_fn(d, d.deliver_sample)
-
-# mosler delivery
-# project delivery
-@deliver.command()
-@click.pass_context
-@click.argument('projectid', type=click.STRING, nargs=-1)
-def mosler(ctx, projectid):
-    """ Deliver the specified projects to MOSLER. Ideally this needs to be used only once when all samples of the project
-        have been sequenced and analysed. mosler subcommand creates a tar file for each sample and moves data to mosler.
-        Mosler password (i.e., user-password and token) need to be inserted once.
-        It is suggested to stage the project locally before deliveing it.
-        If the delivery of the same sample is forced multiple times the user will find multiple directories in the INBOX 
-        folder containing the a tar register with the same name.
-    """
-    for pid in projectid:
-        d = _deliver_mosler.MoslerProjectDeliverer(
-            pid,
-            **ctx.parent.params)
-        _exec_fn(d, d.deliver_project)
+    if ctx.parent.params['cluster'] == 'bianca':
+        projectObj.close_sftp_connnection()
 
 
 # helper function to handle error reporting

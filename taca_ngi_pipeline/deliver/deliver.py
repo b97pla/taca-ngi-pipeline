@@ -122,6 +122,17 @@ class Deliverer(object):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by subclass")
 
+    def get_sample_status(self, dbentry=None):
+        """ Returns the analysis status for this sample. If a sampleentry
+            dict is supplied, it will be used instead of fethcing from database
+
+            :params sampleentry: a database sample entry to use instead of
+                fetching from db
+            :returns: the analysis status of this sample as a string
+        """
+        dbentry = dbentry or self.db_entry()
+        return dbentry.get('status', 'FRESH')
+
     def update_delivery_status(self, *args, **kwargs):
         """ Abstract method, should be implemented by subclasses """
         raise NotImplementedError("This method should be implemented by subclass")
@@ -521,6 +532,15 @@ class SampleDeliverer(Deliverer):
                         and not self.force:
                     logger.info("delivery of {} is already in progress".format(
                         str(self)))
+                    return False
+                elif self.get_sample_status(sampleentry) == 'ABORTED':
+                    logger.info("{} has been marked as ABORTED and will not be delivered".format(str(self)))
+                    #set it to delivered as ABORTED samples should not fail the status of a project
+                    self.update_delivery_status(status="DELIVERED")
+                    return True
+                elif self.get_sample_status(sampleentry) == 'FRESH' \
+                        and not self.force:
+                    logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
                     return False
                 elif self.get_delivery_status(sampleentry) == 'FAILED':
                     logger.info("retrying delivery of previously failed sample {}".format(str(self)))
