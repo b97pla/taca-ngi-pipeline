@@ -6,6 +6,7 @@ import taca.utils.misc
 from deliver import deliver as _deliver
 from deliver import deliver_mosler as _deliver_mosler
 from deliver import deliver_castor as _deliver_castor
+from deliver import deliver_grus as _deliver_grus
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
               help="Only stage the delivery but do not transfer any files")
 @click.option('--force', is_flag=True, default=False,
               help="Force delivery, even if e.g. analysis has not finished or sample has already been delivered")
-@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca']),
+@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca', 'grus']),
               help="Specify to which cluster one wants to deliver")
 
 def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster):
@@ -66,6 +67,10 @@ def project(ctx, projectid):
             d = _deliver_castor.CastorProjectDeliverer(
                 pid,
                 **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'grus':
+            d = _deliver_castor.GrusProjectDeliverer(
+                pid,
+                **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
 
 # sample delivery
@@ -102,6 +107,11 @@ def sample(ctx, projectid, sampleid):
                 projectid,
                 sid,
                 sftp_client=projectObj.sftp_client,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'grus':
+            d = _deliver_grus.GrusSampleDeliverer(
+                projectid,
+                sid,
                 **ctx.parent.params)
         _exec_fn(d, d.deliver_sample)
     if ctx.parent.params['cluster'] == 'bianca':
