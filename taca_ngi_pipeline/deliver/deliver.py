@@ -394,8 +394,12 @@ class ProjectDeliverer(Deliverer):
                 any sample was not properly delivered or ready to be delivered
         """
         try:
-            logger.info("Delivering {} to {}".format(
-                str(self), self.expand_path(self.deliverypath)))
+            if not self.stage_only:
+                logger.info("Delivering {} to {}".format(
+                    str(self), self.expand_path(self.deliverypath)))
+            else:
+                logger.info("Staging {}".format(str(self)))
+        
             if self.get_delivery_status() == 'DELIVERED' \
                     and not self.force:
                 logger.info("{} has already been delivered".format(str(self)))
@@ -430,8 +434,10 @@ class ProjectDeliverer(Deliverer):
                         self.copy_report()
                 except Exception as e:
                     logger.warning("failed to copy report to report outbox, with reason: {}".format(e.message))
-
-                self.update_delivery_status(status="DELIVERED")
+                updated_status = "DELIVERED"
+                if self.stage_only:
+                    updated_status = "STAGED"
+                self.update_delivery_status(status=updated_status)
                 self.acknowledge_delivery()
 
             return status
@@ -517,8 +523,11 @@ class SampleDeliverer(Deliverer):
         """
         # propagate raised errors upwards, they should trigger notification to operator
         try:
-            logger.info("Delivering {} to {}".format(
-                str(self), self.expand_path(self.deliverypath)))
+            if not self.stage_only:
+                logger.info("Delivering {} to {}".format(
+                    str(self), self.expand_path(self.deliverypath)))
+            else:
+                logger.info("Staging {}".format(str(self)))
             try:
                 if self.get_analysis_status(sampleentry) != 'ANALYZED' \
                         and not self.force:
@@ -576,6 +585,8 @@ class SampleDeliverer(Deliverer):
                 self.update_delivery_status()
                 # write a delivery acknowledgement to disk
                 self.acknowledge_delivery()
+            else:
+                self.update_delivery_status(status="STAGED")
             return True
         except DelivererInterruptedError:
             self.update_delivery_status(status="NOT DELIVERED")
