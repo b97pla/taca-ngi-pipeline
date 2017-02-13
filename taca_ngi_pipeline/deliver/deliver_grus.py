@@ -154,7 +154,7 @@ class GrusSampleDeliverer(SampleDeliverer):
                         and not self.force:
                     logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
                     return False
-                elif not os.path.exists(os.path.join(soft_stagepath, str(self))):
+                elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
                     logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(                            str(self), soft_stagepath))
                     return False
                 elif self.get_delivery_status(sampleentry) == 'FAILED':
@@ -166,11 +166,14 @@ class GrusSampleDeliverer(SampleDeliverer):
             #at this point copywith deferance the softlink folder
             self.update_delivery_status(status="IN_PROGRESS")
             #call do_delivery
+            import pdb
+            pdb.set_trace()
+        #in case of faiulure put again the status to STAGED
         except DelivererInterruptedError:
-            self.update_delivery_status(status="NOT DELIVERED")
+            self.update_delivery_status(status="STAGED")
             raise
         except Exception:
-            self.update_delivery_status(status="FAILED")
+            self.update_delivery_status(status="STAGED")
             raise
 
 
