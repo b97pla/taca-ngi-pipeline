@@ -1,94 +1,172 @@
 """ 
-    Module for controlling deliveries os samples and projects to castor (THE castor!!!!)
+    Module for controlling deliveries os samples and projects to GRUS
 """
 import paramiko
 import getpass
 import glob
 import time
 import stat
+import requests
+import datetime
+from dateutil.relativedelta import relativedelta
 
-from deliver import *
+from ngi_pipeline.database.classes import CharonSession, CharonError
+from taca.utils import transfer
 
+from deliver import ProjectDeliverer, SampleDeliverer, DelivererInterruptedError
 
 
 class GrusProjectDeliverer(ProjectDeliverer):
     """ This object takes care of delivering project samples to castor's wharf.
     """
     def __init__(self, projectid=None, sampleid=None, **kwargs):
-        super(CastorProjectDeliverer, self).__init__(
+        super(GrusProjectDeliverer, self).__init__(
             projectid,
             sampleid,
-            **kwargs)
-        # castor specific fields
-        self.castordeliverypath = getattr(self, 'castordeliverypath', None)
-        self.castorsftpserver = getattr(self, 'castorsftpserver', None)
-        self.castorsftpserver_user = getattr(self, 'castorsftpserver_user', None)
-    
-    def create_sftp_connnection(self):
-        try:
-            self.transport=paramiko.Transport(self.castorsftpserver)
-            password = getpass.getpass(prompt='Bianca/Castor Password for user {}:'.format(self.castorsftpserver_user))
-            self.transport.connect(username = "{}-{}".format(self.castorsftpserver_user, self.uppnexid), password = password)
-        except Exception as e:
-            logger.error("Caught exception: {}: {}".format(e.__class__, e))
-            raise
-        #open the sftp client
-        self.sftp_client = MySFTPClient.from_transport(self.transport)
-
-    def close_sftp_connnection(self):
-        try:
-            #now I can close the client
-            self.sftp_client.close()
-            #and the transport
-            self.transport.close()
-        except Exception as e:
-            logger.error("Caught exception: {}: {}".format(e.__class__, e))
-            raise
+            **kwargs
+        )
 
     def deliver_project(self):
-        """ Deliver all samples in a project to castor
-            
+        """ Deliver all samples in a project to grus
             :returns: True if all samples were delivered successfully, False if
                 any sample was not properly delivered or ready to be delivered
         """
+        logger.info("Delivering {} to {}".format(
+            str(self), self.expand_path(self.castordeliverypath)))
+        if self.get_delivery_status() == 'DELIVERED' \
+                and not self.force:
+            logger.info("{} has already been delivered".format(str(self)))
+            return True
+        status = True
         try:
-            logger.info("Delivering {} to {}".format(
-                str(self), self.expand_path(self.castordeliverypath)))
-            if self.get_delivery_status() == 'DELIVERED' \
-                    and not self.force:
-                logger.info("{} has already been delivered".format(str(self)))
-                return True
-            status = True
-            #open one client session and leave it open for all the time of the transfer
-            self.create_sftp_connnection()
-            #memorize all samples that needs to be delivered
-            samples_to_deliver = [sentry['sampleid'] for sentry in db.project_sample_entries(
-                    db.dbcon(), self.projectid).get('samples', [])]
-            status = True
-            # move to the delivery directory in the sftp
-            self.sftp_client.chdir(self.expand_path(self.castordeliverypath))
-            #create the project folder in the remote server
-            self.sftp_client.mkdir(self.projectid, ignore_existing=True)
-            #move inside the project folder
-            self.sftp_client.chdir(self.projectid)
-            #now cycle across the samples
-            for sampleid in samples_to_deliver:
-                sampleDelivererObj = CastorSampleDeliverer(self.projectid, sampleid, self.sftp_client)
-                st = sampleDelivererObj.deliver_sample()
-                status = (status and st)
-            # query the database whether all samples in the project have been sucessfully delivered
-            if self.all_samples_delivered():
-                # this is the only delivery status we want to set on the project level, in order to avoid concurrently
-                # running deliveries messing with each other's status updates
-                self.update_delivery_status(status="DELIVERED")
-                self.acknowledge_delivery()
-            #close connection
-            self.close_sftp_connnection()
-            return status
-        except (db.DatabaseError, DelivererInterruptedError, Exception):
+            # connect to charon, return list of sample objects
+            samples_to_deliver = self.get_staged_samples_from_charon()
+        except Exception, e:
+            logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
             raise
 
+        hard_staged_samples = []
+        for sample_id in samples_to_deliver:
+            try:
+                GrusSampleDeliverer(self.projectid, sample_id).deliver_sample()
+            except Exception, e:
+                logger.error('Sample {} has not been hard staged. Error says: {}'.format(sample_id, error))
+                status = False
+            else:
+                hard_staged_samples.append(sample)
 
+        if len(samples_to_deliver) != len(hard_staged_samples):
+            # do we terminate or do we try to deliver partly?
+            logger.warning('Not all the samples have been hard staged. Terminating')
+            status = False
+            raise something
+
+
+        try:
+            pi_email = self._get_pi_email()
+        except Exception, e:
+            logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
+            status = False
+            return status
+
+        try:
+            pi_id = self._get_pi_id(pi_email)
+        except Exception, e:
+            logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
+            status = False
+            return status
+
+        delivery_project_id = self._create_delivery_project(pi_id)
+        # if do_delivery failed, no token
+        delivery_token = self.do_delivery(delivery_project_id) # instead of to_outbox
+        if delivery_token:
+            # todo: save delivery_token in Charon
+            pass
+        else:
+            status = False
+
+        return status
+
+    def do_delivery(self):
+        pass
+
+    def get_staged_samples_from_charon(self):
+        charon_session = CharonSession()
+        result = charon_session.project_get_samples(self.projectid)
+        samples = result.get('samples')
+        if samples is None:
+            raise AssertionError('CharonSession returned no results for project {}'.format(self.projectid))
+
+        staged_samples = []
+        for sample in samples:
+            sample_id = sample.get('sampleid')
+            delivery_status = sample.get('delivery_status')
+            if delivery_status == 'STAGED':
+                staged_samples.append(sample_id)
+        return staged_samples
+
+
+    def _create_delivery_project(self, pi_id):
+        # "https://disposer.c3se.chalmers.se/supr-test/api/ngi_delivery/project/create/"
+        create_project_url = self.config.get('create_project_url')
+        supr_date_format = '%Y-%m-%d'
+        today = datetime.date.today()
+        six_months_from_now = (today + relativedelta(months=+6))
+        data = {
+            'ngi_project_name': project,
+            'title': "DELIVERY_{}_{}".format(self.projectid, today.strftime(supr_date_format)),
+            'pi_id': pi_id,
+            'start_date': today,
+            'end_date': six_months_from_now.strftime(supr_date_format),
+            'continuation_name': '',
+            # You can use this field to allocate the size of the delivery
+            # 'allocated': size_of_delivery,
+            # This field can be used to add any data you like
+            'api_opaque_data': '',
+            'ngi_ready': False,
+            'ngi_delivery_status': ''
+        }
+
+        response = requests.post(create_project_url,
+                                     data=json.dumps(data),
+                                     auth=(user, password))
+        # todo: get delivery id
+        return response
+
+
+    def _get_pi_id(self, pi_email):
+
+        get_user_url = self.config.get('get_snic_user_api_url')
+        username = self.config.get('snic_username')
+        password = self.config.get('snic_password')
+        response = requests.get(get_user_url, params={'email_i': pi_email}, auth=(username, password))
+        if response.status_code != 200:
+            raise AssertionError("Status code returned when trying to get PI id for email: {} was not 200. Response was: {}".format(pi_email, response.content))
+        result = json.loads(response.content)
+        matches = result["matches"]
+        if len(matches) < 1:
+            raise AssertionError("There were no hits in SUPR for email: {}".format(pi_email))
+        if len(matches) > 1:
+            raise AssertionError("There we more than one hit in SUPR for email: {}".format(pi_email))
+        pi_id = matches[0].get("id")
+        return pi_id
+
+
+    def _get_pi_email(self):
+       # http://genomics_status:et8urph8eg@tools-dev.scilifelab.se:5984
+        url = self.config.get('status_db_url')
+        status_db_url = 'http://{}:{}@{}:{}'.format(self.config.get('username'), self.config.get('password'), url, self.config.get('port'))
+        status_db = self.connect_to_StatusDB(status_db_url)
+        orderportal_db = status_db['orderportal_ngi']
+        view = orderportal_db.view('test/pi_email_and_project_id')
+        rows = view.rows[self.projectid]
+        if len(rows) < 1:
+            raise AssertionError("Project {} not found in StatusDB: {}".format(self.projecid, url))
+        if len(rows) > 1:
+            raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
+
+        pi_email = rows[0].value
+        return pi_email
 
 
 
@@ -154,67 +232,45 @@ class GrusSampleDeliverer(SampleDeliverer):
                         and not self.force:
                     logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
                     return False
-                elif not os.path.exists(os.path.join(soft_stagepath, str(self))):
-                    logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(
-                            str(self), soft_stagepath)
+                elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
+                    logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(str(self), soft_stagepath))
                     return False
                 elif self.get_delivery_status(sampleentry) == 'FAILED':
                         logger.info("retrying delivery of previously failed sample {}".format(str(self)))
             except db.DatabaseError as e:
-                logger.error(
-                    "error '{}' occurred during delivery of {}".format(
+                logger.error("error '{}' occurred during delivery of {}".format(
                         str(e), str(self)))
                 raise
-        #at this point copywith deferance the softlink folder
-        
-        
-        self.update_delivery_status(status="IN_PROGRESS")
-        #call do_delivery
+            #at this point copywith deferance the softlink folder
+            self.update_delivery_status(status="IN_PROGRESS")
 
-
-    
-
+            self.do_delivery()
+        #in case of faiulure put again the status to STAGED
         except DelivererInterruptedError:
-            self.update_delivery_status(status="NOT DELIVERED")
+            self.update_delivery_status(status="STAGED")
             raise
         except Exception:
-            self.update_delivery_status(status="FAILED")
+            self.update_delivery_status(status="STAGED")
             raise
-
-
-
-
-
 
 
     def do_delivery(self):
-        """ Deliver the staged delivery folder using sftp
+        """ Creating a hard copy of staged data
             :returns: True if delivery was successful, False if unsuccessful
-            :raises DelivererTOBEDEFINEDError: if an exception occurred during
-                transfer
+            :raises DelivererTOBEDEFINEDError: if an exception occurred when creating a hard copy
         """
-        # transfer it (maybe an open session is needed)
-        logger.info("{} transferring sample to castor sftp server".format(self.sampleid))
+
+        logger.info("Creating hard copy of sample {}".format(self.sampleid))
+
         try:
-            #http://stackoverflow.com/questions/4409502/directory-transfers-on-paramiko
-            #walk through the staging path and recreate the same path in castor and put files there
-            origin_folder_sample = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
-            #create the sample folder
-            self.sftp_client.mkdir(self.sampleid, ignore_existing=True)
-            #now target dir is created
-            targed_dir = self.sampleid
-            self.sftp_client.put_dir(origin_folder_sample ,targed_dir)
-            #now copy the md5
-            source_md5 = os.path.join(self.expand_path(self.stagingpath), "{}.md5".format(self.sampleid))
-            target_md5 = os.path.join(self.sftp_client.getcwd(), "{}.md5".format(self.sampleid))
-            self.sftp_client.put(source_md5, target_md5)
+            if os.path.exists(self.stagingpathhard):
+
+                source_md5 = os.path.join(self.expand_path(self.stagingpath), "{}.md5".format(self.sampleid))
+                target_md5 = os.path.join(self.sftp_client.getcwd(), "{}.md5".format(self.sampleid))
+                self.sftp_client.put(source_md5, target_md5)
         except Exception as e:
             print 'Caught exception: {}: {}'.format(e.__class__, e)
             raise
-        logger.info("{} sample transferred to castor sftp server".format(self.sampleid))
+        logger.info("Sample {} has been hard staged in {}".format(self.stagingpathhard))
         # return True, if something went wrong an exception is thrown before this
         return True
-
-
-
-
