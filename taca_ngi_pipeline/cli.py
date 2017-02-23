@@ -2,6 +2,9 @@
 """
 import click
 import logging
+
+from ngi_pipeline.database.classes import CharonSession
+
 import taca.utils.misc
 from deliver import deliver as _deliver
 from deliver import deliver_mosler as _deliver_mosler
@@ -68,7 +71,7 @@ def project(ctx, projectid):
                 pid,
                 **ctx.parent.params)
         elif ctx.parent.params['cluster'] == 'grus':
-            d = _deliver_castor.GrusProjectDeliverer(
+            d = _deliver_grus.GrusProjectDeliverer(
                 pid,
                 **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
@@ -142,3 +145,18 @@ def _exec_fn(obj, fn):
         else:
             logger.error("processing {} failed - reason: {}, operator {} has been notified".format(
                 str(obj), str(e), obj.config.get('operator')))
+
+
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=-1)
+def check_grus_delivery_status(context, projectid=None):
+    if projectid is not None:
+        charon_session = CharonSession()
+        project = charon_session.project_get(projectid)
+        delivery_token = project.get('delivery_token')
+        delivery_status = project.get('delivery_status')
+        if delivery_status == 'IN_PROGRESS' and delivery_token:
+            logger.info('Checking the delivery status')
+            # todo: how do we check if it's done or not??
+            # this api:  /api/project/search/ ?
