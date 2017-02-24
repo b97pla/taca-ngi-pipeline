@@ -1,354 +1,192 @@
-""" 
-    Module for controlling deliveries os samples and projects to GRUS
+""" CLI for the deliver subcommand
 """
-import paramiko
-import getpass
-import glob
-import time
-import stat
-import requests
-import datetime
-from dateutil.relativedelta import relativedelta
-import os
+import click
 import logging
-import couchdb
-import json
+import os
 import subprocess
 
-from ngi_pipeline.database.classes import CharonSession, CharonError
-from taca.utils.filesystem import do_copy, create_folder
+from ngi_pipeline.database.classes import CharonSession
 from taca.utils.config import CONFIG
 
-from deliver import ProjectDeliverer, SampleDeliverer, DelivererInterruptedError
+import taca.utils.misc
+from deliver import deliver as _deliver
+from deliver import deliver_mosler as _deliver_mosler
+from deliver import deliver_castor as _deliver_castor
+from deliver import deliver_grus as _deliver_grus
 
-logger = logging.getLogger(__name__)
+from deliver.deliver_grus import GrusProjectDeliverer
+
+#######################################
+# deliver
+#######################################
 
 
-class GrusProjectDeliverer(ProjectDeliverer):
-    """ This object takes care of delivering project samples to castor's wharf.
+@click.group()
+@click.pass_context
+@click.option('--deliverypath', type=click.STRING, help="Deliver to this destination folder")
+@click.option('--stagingpath', type=click.STRING, help="Stage the delivery under this path")
+@click.option('--uppnexid', type=click.STRING, help="Use this UppnexID instead of fetching from database")
+@click.option('--operator', type=click.STRING, default=None, multiple=True,
+              help="Email address to notify operator at. Multiple operators can be specified")
+@click.option('--stage_only', is_flag=True, default=False,
+              help="Only stage the delivery but do not transfer any files")
+@click.option('--force', is_flag=True, default=False,
+              help="Force delivery, even if e.g. analysis has not finished or sample has already been delivered")
+@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca', 'grus']),
+              help="Specify to which cluster one wants to deliver")
+
+def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster):
+    """ Deliver methods entry point
     """
-    def __init__(self, projectid=None, sampleid=None, **kwargs):
-        super(GrusProjectDeliverer, self).__init__(
-            projectid,
-            sampleid,
-            **kwargs
-        )
+    if deliverypath is None:
+        del ctx.params['deliverypath']
+    if stagingpath is None:
+        del ctx.params['stagingpath']
+    if uppnexid is None:
+        del ctx.params['uppnexid']
+    if operator is None or len(operator) == 0:
+        del ctx.params['operator']
 
-        self.stagingpathhard = getattr(self, 'stagingpathhard', None)
-        if self.stagingpathhard is None:
-            raise AttributeError("staginpathhard is required when delivering to GRUS")
-        #check if the project directory already exists, if so abort
-        hard_stagepath = self.expand_path(self.stagingpathhard)
-        if os.path.exists(hard_stagepath):
-            logger.error("In {} found already folder {}. No multiple mover deliveries are allowed".format(
-                    hard_stagepath, projectid))
-            raise DelivererInterruptedError("Hard Staged Folder already present")
+# deliver subcommands
+
+# project delivery
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=-1)
+def project(ctx, projectid):
+    """ Deliver the specified projects to the specified destination
+    """
+    if ctx.parent.params['cluster'] == 'bianca':
+        if len(projectid) > 1:
+            logger.error("Only one project can be specified when delivering to Bianca. Specficied {} projects".format(len(projectid)))
+            return 1
+    for pid in projectid:
+        if ctx.parent.params['cluster'] == 'milou':
+            d = _deliver.ProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'mosler':
+            d = _deliver_mosler.MoslerProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'bianca':
+            d = _deliver_castor.CastorProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'grus':
+            d = _deliver_grus.GrusProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        _exec_fn(d, d.deliver_project)
+
+# sample delivery
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=1)
+@click.argument('sampleid', type=click.STRING, nargs=-1)
+def sample(ctx, projectid, sampleid):
+    """ Deliver the specified sample to the specified destination
+    """
+    if ctx.parent.params['cluster'] == 'bianca':
+        #in this case I need to open a sftp connection in order to avoid to insert password everytime
+        projectObj = _deliver_castor.CastorProjectDeliverer(projectid, **ctx.parent.params)
+        projectObj.create_sftp_connnection()
+        #create the project folder in the remote server
+        #move to delivery folder
+        projectObj.sftp_client.chdir(projectObj.config.get('castordeliverypath', '/wharf'))
+        projectObj.sftp_client.mkdir(projectid, ignore_existing=True)
+        #move inside the project folder
+        projectObj.sftp_client.chdir(projectid)
+    for sid in sampleid:
+        if ctx.parent.params['cluster'] == 'milou':
+            d = _deliver.SampleDeliverer(
+                projectid,
+                sid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'mosler':
+            d = _deliver_mosler.MoslerSampleDeliverer(
+                projectid,
+                sid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'bianca':
+            d = _deliver_castor.CastorSampleDeliverer(
+                projectid,
+                sid,
+                sftp_client=projectObj.sftp_client,
+                **ctx.parent.params)
+
+        # # guess this one should be removed, as we only deliver the project
+        # elif ctx.parent.params['cluster'] == 'grus':
+        #     d = _deliver_grus.GrusSampleDeliverer(
+        #         projectid,
+        #         sid,
+        #         **ctx.parent.params)
+        _exec_fn(d, d.deliver_sample)
+    if ctx.parent.params['cluster'] == 'bianca':
+        projectObj.close_sftp_connnection()
+
+
+# helper function to handle error reporting
+def _exec_fn(obj, fn):
+    try:
+        if fn():
+            logger.info(
+                "{} processed successfully".format(str(obj)))
         else:
-            #otherwise lock the delivery by creating the folder
-            create_folder(hard_stagepath)
-
-    def deliver_project(self):
-        """ Deliver all samples in a project to grus
-            :returns: True if all samples were delivered successfully, False if
-                any sample was not properly delivered or ready to be delivered
-        """
-        logger.info("Delivering {} to GRUS".format(str(self)))
-        if self.get_delivery_status() == 'DELIVERED' \
-                and not self.force:
-            logger.info("{} has already been delivered".format(str(self)))
-            return True
-        status = True
+            logger.info(
+                "{} processed with some errors, check log".format(
+                    str(obj)))
+    except Exception as e:
         try:
-            # connect to charon, return list of sample objects
-            samples_to_deliver = self.get_staged_samples_from_charon()
-        except Exception, e:
-            logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
-            logger.exception(e)
-            raise
-
-        hard_staged_samples = []
-        for sample_id in samples_to_deliver:
-            try:
-                sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
-                sample_deliverer.deliver_sample()
-            except Exception, e:
-                logger.error('Sample {} has not been hard staged. Error says: {}'.format(sample_id, error))
-                logger.exception(e)
-                raise e
-            else:
-                hard_staged_samples.append(sample_id)
-
-        if len(samples_to_deliver) != len(hard_staged_samples):
-            # do we terminate or do we try to deliver partly?
-            logger.warning('Not all the samples have been hard staged. Terminating')
-            raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver), len(hard_staged_samples)))
-
-        try:
-            pi_email = self._get_pi_email()
-        except Exception, e:
-
-            logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
-            # print the traceback, not only error message -> isn't it something more useful?
-            logger.exception(e)
-            status = False
-            return status
-
-        try:
-            pi_id = self._get_pi_id(pi_email)
-        except Exception, e:
-            logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
-            logger.exception(e)
-            status = False
-            return status
-
-        # '265' has been created from my local pc and really exists.
-        delivery_project_id = '265'
-        try:
-            delivery_project_id = self._create_delivery_project(pi_id)
-        except Exception, e:
-            logger.error('Cannot create delivery project. Error says: {}'.format())
-            logger.exception(e)
-        # if do_delivery failed, no token
-        delivery_token = self.do_delivery(delivery_project_id) # instead of to_outbox
-
-        if delivery_token:
-            # todo: save delivery_token in Charon
-            self.save_delivery_token_in_charon(delivery_token)
+            taca.utils.misc.send_mail(
+                subject="[ERROR] processing failed: {}".format(str(obj)),
+                content="Project: {}\nSample: {}\nCommand: {}\n\nAdditional information:{}\n".format(
+                    obj.projectid, obj.sampleid, str(fn), str(e)),
+                receiver=obj.config.get('operator'))
+        except Exception as me:
+            logger.error(
+                "processing {} failed - reason: {}, but operator {} could not be notified - reason: {}".format(
+                    str(obj), e, obj.config.get('operator'), me))
         else:
-            logger.error('Delivery project has not been created')
-            status = False
-
-        return status
-
-    def save_delivery_token_in_charon(self, delivery_token):
-        '''Updates delivery_token in Charon
-        '''
-        ## TODO: need to update ngi_pipeline.database.classes.project_update
-        ## and add field in Charon
-        charon_session = CharonSession()
-        charon_session.project_update(self.projectid, delivery_token=delivery_token)
-
-    def delete_delivery_token_in_charon(self):
-        '''Removes delivery_token from Charon upon successful delivery
-        '''
-        charon_session = CharonSession()
-        charon_session.project_update(self.projectid, delivery_token='')
-
-    def do_delivery(self, delivery_project_id):
-        # this one returns error : "265 is non-existing at /usr/local/bin/to_outbox line 214". (265 is delivery_project_id)
-        subprocess.call('to_outbox {} {}'.format(delivery_project_id, self.projectid), shell=True)
+            logger.error("processing {} failed - reason: {}, operator {} has been notified".format(
+                str(obj), str(e), obj.config.get('operator')))
 
 
-    def get_staged_samples_from_charon(self):
-        charon_session = CharonSession()
-        result = charon_session.project_get_samples(self.projectid)
-        samples = result.get('samples')
-        if samples is None:
-            raise AssertionError('CharonSession returned no results for project {}'.format(self.projectid))
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', required=False, default=None)
+def check_status(context, projectid=None):
+    if projectid is not None:
+        GrusProjectDeliverer(projectid).check_delivery_status()
+    else:
+        for projectid in os.listdir(stagingpathhard):
+            GrusProjectDeliverer(projectid).check_delivery_status()
 
-        staged_samples = []
-        for sample in samples:
-            sample_id = sample.get('sampleid')
-            delivery_status = sample.get('delivery_status')
-            if delivery_status == 'STAGED':
-                staged_samples.append(sample_id)
-        return staged_samples
+    # # checking single project if project is specified
+    # stagingpathhard = ''
+    # if projectid is not None:
+    #     charon_session = CharonSession()
+    #     project = charon_session.project_get(projectid)
+    #     delivery_token = project.get('delivery_token')
+    #     delivery_status = project.get('delivery_status')
+    #     if delivery_status == 'IN_PROGRESS' and delivery_token:
+    #         logger.info('Checking the delivery status')
+    #         subprocess.call('moverinfo -i {}'.format(delivery_token))
+    #         # i don't know how to parse output, as I didn't manage to get a valid token
+    #         output = subprocess.communicate()
+    #         # most likely need to split the string to find the correct value
+    #         status = output.split('')
+    #         if status == 'DELIVERED': # i don't know yet how the status will look like
+    #             if os.path.exists(stagingpathhard):
+    #                 log.error()
 
-
-    def _create_delivery_project(self, pi_id):
-        # "https://disposer.c3se.chalmers.se/supr-test/api/ngi_delivery/project/create/"
-        create_project_url = self.config.get('snic_api_url_create_project')
-        user = self.config.get('snic_api_user')
-        password = self.config.get('snic_api_password')
-        supr_date_format = '%Y-%m-%d'
-        today = datetime.date.today()
-        six_months_from_now = (today + relativedelta(months=+6))
-        data = {
-            'ngi_project_name': self.projectid,
-            'title': "DELIVERY_{}_{}".format(self.projectid, today.strftime(supr_date_format)),
-            'pi_id': pi_id,
-            'start_date': today.strftime(supr_date_format),
-            'end_date': six_months_from_now.strftime(supr_date_format),
-            'continuation_name': '',
-            # You can use this field to allocate the size of the delivery
-            # 'allocated': size_of_delivery,
-            # This field can be used to add any data you like
-            'api_opaque_data': '',
-            'ngi_ready': False,
-            'ngi_delivery_status': ''
-        }
-
-        response = requests.post(create_project_url,
-                                     data=json.dumps(data),
-                                     auth=(user, password))
-        if response.status_code != 200:
-            raise AssertionError("API returned status code {}. Response: {}. URL: {}".format(response.status_code, response.content, create_project_url))
-        # response will look like: {"links_incoming": [], "webpage": "", "abstract": "", "affiliation": "Stockholms universitet", "directory_name": "", "id": 231, "classification3": "", "classification2": "", "classification1": "", "title": "DELIVERY_P6968_2017-02-22", "pi": {"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}, "type": "NGI Delivery", "start_date": "2017-02-22 00:00:00", "ngi_ready": false, "end_date": "2017-08-22 00:00:00", "resourceprojects": [{"allocated": 1000, "resource": {"centre": {"name": "UPPMAX", "id": 4}, "capacity_unit": "GiB", "id": 42, "name": "Grus"}, "id": 255, "allocations": [{"allocated": 1000, "start_date": "2017-02-22", "end_date": "2017-08-22", "id": 278}]}], "links_outgoing": [], "members": [{"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}], "continuation_name": "", "name": "delivery00114", "managed_in_supr": true, "modified": "2017-02-22 13:56:12", "api_opaque_data": "", "ngi_delivery_status": "", "ngi_project_name": "P6968"}
-        delivery_id = response.content.get('id')
-        return delivery_id
-
-    def _get_pi_id(self, pi_email):
-        return '121'
-        print 'get_pi_id'
-
-        get_user_url = self.config.get('snic_api_url_get_user')
-        print 'config.get("snic_api_url_get_user")'
-        print get_user_url
-        get_user_url = '{}?email={}'.format(get_user_url, pi_email)
-        print 'get_user_url'
-        print get_user_url
-        username = self.config.get('snic_api_user')
-        password = self.config.get('snic_api_password')
-        print get_user_url, username, password
-        response = requests.get(get_user_url, auth=(username, password))
-
-        if response.status_code != 200:
-            raise AssertionError("Status code returned when trying to get PI id for email: {} was not 200. Response was: {}".format(pi_email, response.content))
-        result = json.loads(response.content)
-        matches = result.get("matches")
-        if matches is None:
-            raise AssertionError('The response returned unexpected data')
-        if len(matches) < 1:
-            raise AssertionError("There were no hits in SUPR for email: {}".format(pi_email))
-        if len(matches) > 1:
-            raise AssertionError("There we more than one hit in SUPR for email: {}".format(pi_email))
-
-        pi_id = matches[0].get("id")
-        return pi_id
-
-
-    def _get_pi_email(self):
-        url = CONFIG.get('statusdb', {}).get('url')
-        username = CONFIG.get('statusdb', {}).get('username')
-        password = CONFIG.get('statusdb', {}).get('password')
-        port = CONFIG.get('statusdb', {}).get('port')
-        status_db_url = 'http://{}:{}@{}:{}'.format(username, password, url, port)
-
-        status_db = couchdb.Server(status_db_url)
-        orderportal_db = status_db['orderportal_ngi']
-        view = orderportal_db.view('taca/project_id_to_pi_email')
-        rows = view[self.projectid].rows
-        if len(rows) < 1:
-            raise AssertionError("Project {} not found in StatusDB: {}".format(self.projecid, url))
-        if len(rows) > 1:
-            raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
-
-        pi_email = rows[0].value
-        return pi_email
-
-
-class GrusSampleDeliverer(SampleDeliverer):
-    """
-        A class for handling sample deliveries to castor
-    """
-
-    def __init__(self, projectid=None, sampleid=None, **kwargs):
-        super(GrusSampleDeliverer, self).__init__(
-            projectid,
-            sampleid,
-            **kwargs)
-
-        # self.stagingpathhard = getattr(self, 'stagingpathhard', None)
-        # if self.stagingpathhard is None:
-        #     raise AttributeError("staginpathhard is required when delivering to GRUS")
-        # #check if the project directory already exists, if so abort
-        # hard_stagepath = self.expand_path(self.stagingpathhard)
-        # if os.path.exists(hard_stagepath):
-        #     logger.error("In {} found already folder {}. No multiple mover deliveries are allowed".format(
-        #             hard_stagepath, projectid))
-        #     raise DelivererInterruptedError("Hard Staged Folder already present")
-        # else:
-        #     #otherwise lock the delivery by creating the folder
-        #     create_folder(hard_stagepath)
-
-    def deliver_sample(self, sampleentry=None):
-        """ Deliver a sample to the destination specified via command line of on Charon.
-            Will check if the sample has already been delivered and should not
-            be delivered again or if the sample is not yet ready to be delivered.
-            Delivers only samples that have been staged.
-
-            :params sampleentry: a database sample entry to use for delivery,
-                be very careful with caching the database entries though since
-                concurrent processes can update the database at any time
-            :returns: True if sample was successfully delivered or was previously
-                delivered, False if sample was not yet ready to be delivered
-            :raises taca_ngi_pipeline.utils.database.DatabaseError: if an entry corresponding to this
-                sample could not be found in the database
-            :raises DelivererReplaceError: if a previous delivery of this sample
-                has taken place but should be replaced
-            :raises DelivererError: if the delivery failed
-        """
-        # propagate raised errors upwards, they should trigger notification to operator
-        # try:
-        logger.info("Delivering {} to GRUS with MOVER!!!!!".format(str(self)))
-        hard_stagepath = self.expand_path(self.stagingpathhard)
-        soft_stagepath = self.expand_path(self.stagingpath)
-        # try:
-        if self.get_delivery_status(sampleentry) != 'STAGED':
-            logger.info("{} has not been stages and will not be delivered".format(str(self)))
-            return False
-        if self.get_delivery_status(sampleentry) == 'DELIVERED' \
-                and not self.force:
-            logger.info("{} has already been delivered".format(str(self)))
-            return True
-        elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
-                and not self.force:
-            logger.info("delivery of {} is already in progress".format(
-                    str(self)))
-            return False
-        elif self.get_sample_status(sampleentry) == 'FRESH' \
-                and not self.force:
-            logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
-            return False
-        elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
-            logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(str(self), soft_stagepath))
-            return False
-        elif self.get_delivery_status(sampleentry) == 'FAILED':
-                logger.info("retrying delivery of previously failed sample {}".format(str(self)))
-            # except db.DatabaseError as e:
-                # logger.error("error '{}' occurred during delivery of {}".format(
-                        # str(e), str(self)))
-                # raise
-            #at this point copywith deferance the softlink folder
-        self.update_delivery_status(status="IN_PROGRESS")
-
-        self.do_delivery()
-
-        #in case of faiulure put again the status to STAGED
-        # except DelivererInterruptedError:
-            # self.update_delivery_status(status="STAGED")
-            # raise
-        # except Exception:
-            # self.update_delivery_status(status="STAGED")
-            # raise
-
-
-    def do_delivery(self):
-        """ Creating a hard copy of staged data
-            :returns: True if delivery was successful, False if unsuccessful
-            :raises DelivererTOBEDEFINEDError: if an exception occurred when creating a hard copy
-        """
-
-        logger.info("Creating hard copy of sample {}".format(self.sampleid))
-
-        # try:
-            # stagingpath is a project directory
-        # join stage dir with sample dir
-        source = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
-        destination = os.path.join(self.expand_path(self.stagingpathhard), self.sampleid)
-
-        # destination must NOT exist
-        # if it's already exists, we can:
-        # 1. mover is currently moving data -> throw an error
-        # 2. we delete folder and create a new copy
-        do_copy(source, destination)
-
-
-        # except Exception as e:
-            # print 'Caught exception: {}: {}'.format(e.__class__, e)
-            # raise
-
-        logger.info("Sample {} has been hard staged to {}".format(self.sampleid, destination))
-
-        # if something went wrong we got an exception before
-        return True
+    # # otherwise getting list of ongoing deliveries and checking status for all
+    # else:
+    #    # todo: implement taca.filesystem.list_dir
+    #    # assuming that if project is present in the DELIVERY_HARD folder, the delivery is ongoing
+    #     stagingpathhard = ctx.parent.params.get('stagingpathhard')
+    #     print 'stagingpathhard'
+    #     print stagingpathhard
+    #     list_of_projects = os.listdir(stagingpathhard)
+    #     print 'list_of_projects'
+    #     print list_of_projects
