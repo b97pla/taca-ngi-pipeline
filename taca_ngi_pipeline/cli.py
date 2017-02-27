@@ -14,6 +14,10 @@ from deliver import deliver_mosler as _deliver_mosler
 from deliver import deliver_castor as _deliver_castor
 from deliver import deliver_grus as _deliver_grus
 
+from deliver.deliver_grus import GrusProjectDeliverer
+
+logger = logging.getLogger(__name__)
+
 #######################################
 # deliver
 #######################################
@@ -46,7 +50,6 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
         del ctx.params['operator']
 
 # deliver subcommands
-
 # project delivery
 @deliver.command()
 @click.pass_context
@@ -135,6 +138,7 @@ def _exec_fn(obj, fn):
                 "{} processed with some errors, check log".format(
                     str(obj)))
     except Exception as e:
+        logger.exception(e)
         try:
             taca.utils.misc.send_mail(
                 subject="[ERROR] processing failed: {}".format(str(obj)),
@@ -152,44 +156,12 @@ def _exec_fn(obj, fn):
 
 @deliver.command()
 @click.pass_context
-@click.argument('projectid', type=click.STRING, nargs=-1)
+@click.argument('projectid', required=False, default=None)
 def check_status(context, projectid=None):
+    # how do we access config file??
+    stagingpathhard = config.get('stagingpathhard')
+    # if project specified, check only this project, otherwise all projects from stagingpathhard
+    projects = [projectid] if projectid is not None else os.listdir(stagingpathhard)
 
-
-
-    # checking single project if project is specified
-
-    # how to get this?
-    stagingpathhard = ''
-    if projectid is not None:
-        charon_session = CharonSession()
-        project = charon_session.project_get(projectid)
-        delivery_token = project.get('delivery_token')
-        delivery_status = project.get('delivery_status')
-        if delivery_status == 'IN_PROGRESS' and delivery_token:
-            logger.info('Checking the delivery status')
-            subprocess.call('moverinfo -i {}'.format(delivery_token))
-            # i don't know how to parse output, as I didn't manage to get a valid token
-            output = subprocess.communicate()
-            # most likely need to split the string to find the correct value
-            status = output.split('')
-            if status == 'DELIVERED': # i don't know yet how the status will look like
-                # checking if project in DELIVERY_HARD
-                if projectid in os.listdir(stagingpathhard):
-                    logging.error('Mover returned status "DELIVERED", but the project is still present in DELIVERY_HARD!')
-                    update_charon
-                    raise AssertionError('DELIVERY FAILED!')
-                else:
-                    logging.info
-
-
-    # otherwise getting list of ongoing deliveries and checking status for all
-    else:
-       # todo: implement taca.filesystem.list_dir
-       # assuming that if project is present in the DELIVERY_HARD folder, the delivery is ongoing
-        stagingpathhard = ctx.parent.params.get('stagingpathhard')
-        print 'stagingpathhard'
-        print stagingpathhard
-        list_of_projects = os.listdir(stagingpathhard)
-        print 'list_of_projects'
-        print list_of_projects
+    for projectid in projects:
+        GrusProjectDeliverer(projectid).check_mover_delivery_status()
