@@ -4,4 +4,4 @@ pyyaml
 taca>=0.1.9
 ngi_pipeline
 paramiko
-pathon-dateutil
+python-dateutil

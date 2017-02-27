@@ -158,8 +158,18 @@ def _exec_fn(obj, fn):
 @click.pass_context
 @click.argument('projectid', required=False, default=None)
 def check_status(context, projectid=None):
+    import pdb; pdb.set_trace()
     # how do we access config file??
-    stagingpathhard = config.get('stagingpathhard')
+    stagingpathhard = CONFIG.get('deliver', {}).get('stagingpathhard')
+
+    if stagingpathhard is None:
+        logger.error('Config file requires "stagingpathhard"!!')
+        exit(1)
+
+    # doing stupid stuff - creating whatever random project, just to get the path to DELIVERY_HARD
+    stagingpathhard = _deliver.ProjectDeliverer('P4601').expand_path(stagingpathhard)
+    stagingpathhard = os.path.abspath(os.path.join(stagingpathhard, '..'))
+
     # if project specified, check only this project, otherwise all projects from stagingpathhard
     projects = [projectid] if projectid is not None else os.listdir(stagingpathhard)
 
