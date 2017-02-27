@@ -341,44 +341,48 @@ class GrusSampleDeliverer(SampleDeliverer):
         hard_stagepath = self.expand_path(self.stagingpathhard)
         soft_stagepath = self.expand_path(self.stagingpath)
 
-        # try:
-        if self.get_delivery_status(sampleentry) != 'STAGED':
-            logger.info("{} has not been stages and will not be delivered".format(str(self)))
-            return False
-        if self.get_delivery_status(sampleentry) == 'DELIVERED' \
-                and not self.force:
-            logger.info("{} has already been delivered".format(str(self)))
-            return True
-        elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
-                and not self.force:
-            logger.info("delivery of {} is already in progress".format(
-                    str(self)))
-            return False
-        elif self.get_sample_status(sampleentry) == 'FRESH' \
-                and not self.force:
-            logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
-            return False
-        elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
-            logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(str(self), soft_stagepath))
-            return False
-        elif self.get_delivery_status(sampleentry) == 'FAILED':
-                logger.info("retrying delivery of previously failed sample {}".format(str(self)))
-            # except db.DatabaseError as e:
-                # logger.error("error '{}' occurred during delivery of {}".format(
-                        # str(e), str(self)))
-                # raise
+        try:
+            logger.info("Delivering {} to GRUS with MOVER!!!!!".format(str(self)))
+            hard_stagepath = self.expand_path(self.stagingpathhard)
+            soft_stagepath = self.expand_path(self.stagingpath)
+            try:
+                if self.get_delivery_status(sampleentry) != 'STAGED':
+                    logger.info("{} has not been stages and will not be delivered".format(str(self)))
+                    return False
+                if self.get_delivery_status(sampleentry) == 'DELIVERED' \
+                        and not self.force:
+                    logger.info("{} has already been delivered".format(str(self)))
+                    return True
+                elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
+                        and not self.force:
+                    logger.info("delivery of {} is already in progress".format(
+                            str(self)))
+                    return False
+                elif self.get_sample_status(sampleentry) == 'FRESH' \
+                        and not self.force:
+                    logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
+                    return False
+                elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
+                    logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(                            str(self), soft_stagepath))
+                    return False
+                elif self.get_delivery_status(sampleentry) == 'FAILED':
+                        logger.info("retrying delivery of previously failed sample {}".format(str(self)))
+            except db.DatabaseError as e:
+                logger.error("error '{}' occurred during delivery of {}".format(
+                        str(e), str(self)))
+                raise
             #at this point copywith deferance the softlink folder
-        self.update_delivery_status(status="IN_PROGRESS")
-
-        self.do_delivery()
-
-        #in case of failure put again the status to STAGED
-        # except DelivererInterruptedError:
-            # self.update_delivery_status(status="STAGED")
-            # raise
-        # except Exception:
-            # self.update_delivery_status(status="STAGED")
-            # raise
+            self.update_delivery_status(status="IN_PROGRESS")
+            #call do_delivery
+            import pdb
+            pdb.set_trace()
+        #in case of faiulure put again the status to STAGED
+        except DelivererInterruptedError:
+            self.update_delivery_status(status="STAGED")
+            raise
+        except Exception:
+            self.update_delivery_status(status="STAGED")
+            raise
 
 
     def do_delivery(self):
