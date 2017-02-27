@@ -117,7 +117,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         else:
             #otherwise lock the delivery by creating the folder
             create_folder(hard_stagepath)
-        import pdb; pdb.set_trace()
         logger.info("Delivering {} to GRUS".format(str(self)))
         if self.get_delivery_status() == 'DELIVERED' \
                 and not self.force:
@@ -130,7 +129,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         except Exception, e:
             logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
             logger.exception(e)
-            raise
+            exit(1)
 
         if len(samples_to_deliver) == 0:
             logger.warning('No staged samples found in Charon')
@@ -144,7 +143,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             except Exception, e:
                 logger.error('Sample {} has not been hard staged. Error says: {}'.format(sample_id, error))
                 logger.exception(e)
-                raise e
+                exit(1)
             else:
                 hard_staged_samples.append(sample_id)
         if len(samples_to_deliver) != len(hard_staged_samples):
@@ -370,19 +369,20 @@ class GrusSampleDeliverer(SampleDeliverer):
             except db.DatabaseError as e:
                 logger.error("error '{}' occurred during delivery of {}".format(
                         str(e), str(self)))
-                raise
+                logger.exception(e)
+                exit(1)
             #at this point copywith deferance the softlink folder
             self.update_delivery_status(status="IN_PROGRESS")
             #call do_delivery
-            import pdb
-            pdb.set_trace()
         #in case of faiulure put again the status to STAGED
-        except DelivererInterruptedError:
+        except DelivererInterruptedError, e:
             self.update_delivery_status(status="STAGED")
-            raise
-        except Exception:
+            logger.exception(e)
+            exit(1)
+        except Exception, e:
             self.update_delivery_status(status="STAGED")
-            raise
+            logger.exception(e)
+            exit(1) # or raise, whatever. But I'd prefer exit(1)
 
 
     def do_delivery(self):
@@ -407,8 +407,9 @@ class GrusSampleDeliverer(SampleDeliverer):
 
 
         # except Exception as e:
-            # print 'Caught exception: {}: {}'.format(e.__class__, e)
-            # raise
+            # logger.error('Caught exception: {}: {}'.format(e.__class__, e))
+            # logger.exception(e)
+            # exit(1)
 
         logger.info("Sample {} has been hard staged to {}".format(self.sampleid, destination))
 
