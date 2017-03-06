@@ -2,11 +2,19 @@
 """
 import click
 import logging
+import os
+import subprocess
+
+from ngi_pipeline.database.classes import CharonSession
+from taca.utils.config import CONFIG
+
 import taca.utils.misc
 from deliver import deliver as _deliver
 from deliver import deliver_mosler as _deliver_mosler
 from deliver import deliver_castor as _deliver_castor
 from deliver import deliver_grus as _deliver_grus
+
+from deliver.deliver_grus import GrusProjectDeliverer
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +50,6 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
         del ctx.params['operator']
 
 # deliver subcommands
-
 # project delivery
 @deliver.command()
 @click.pass_context
@@ -68,7 +75,7 @@ def project(ctx, projectid):
                 pid,
                 **ctx.parent.params)
         elif ctx.parent.params['cluster'] == 'grus':
-            d = _deliver_castor.GrusProjectDeliverer(
+            d = _deliver_grus.GrusProjectDeliverer(
                 pid,
                 **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
@@ -108,11 +115,13 @@ def sample(ctx, projectid, sampleid):
                 sid,
                 sftp_client=projectObj.sftp_client,
                 **ctx.parent.params)
-        elif ctx.parent.params['cluster'] == 'grus':
-            d = _deliver_grus.GrusSampleDeliverer(
-                projectid,
-                sid,
-                **ctx.parent.params)
+
+        # # guess this one should be removed, as we only deliver the project
+        # elif ctx.parent.params['cluster'] == 'grus':
+        #     d = _deliver_grus.GrusSampleDeliverer(
+        #         projectid,
+        #         sid,
+        #         **ctx.parent.params)
         _exec_fn(d, d.deliver_sample)
     if ctx.parent.params['cluster'] == 'bianca':
         projectObj.close_sftp_connnection()
@@ -129,6 +138,7 @@ def _exec_fn(obj, fn):
                 "{} processed with some errors, check log".format(
                     str(obj)))
     except Exception as e:
+        logger.exception(e)
         try:
             taca.utils.misc.send_mail(
                 subject="[ERROR] processing failed: {}".format(str(obj)),
@@ -142,3 +152,26 @@ def _exec_fn(obj, fn):
         else:
             logger.error("processing {} failed - reason: {}, operator {} has been notified".format(
                 str(obj), str(e), obj.config.get('operator')))
+
+
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', required=False, default=None)
+def check_status(context, projectid=None):
+    import pdb; pdb.set_trace()
+    # how do we access config file??
+    stagingpathhard = CONFIG.get('deliver', {}).get('stagingpathhard')
+
+    if stagingpathhard is None:
+        logger.error('Config file requires "stagingpathhard"!!')
+        exit(1)
+
+    # doing stupid stuff - creating whatever random project, just to get the path to DELIVERY_HARD
+    stagingpathhard = _deliver.ProjectDeliverer('P4601').expand_path(stagingpathhard)
+    stagingpathhard = os.path.abspath(os.path.join(stagingpathhard, '..'))
+
+    # if project specified, check only this project, otherwise all projects from stagingpathhard
+    projects = [projectid] if projectid is not None else os.listdir(stagingpathhard)
+
+    for projectid in projects:
+        GrusProjectDeliverer(projectid).check_mover_delivery_status()
