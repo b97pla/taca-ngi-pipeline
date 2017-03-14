@@ -37,7 +37,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
         self.stagingpathhard = getattr(self, 'stagingpathhard', None)
         if self.stagingpathhard is None:
-            raise AttributeError("staginpathhard is required when delivering to GRUS")
+            raise AttributeError("stagingpathhard is required when delivering to GRUS")
 
     def check_mover_delivery_status(self):
         # todo: maybe makes sense to re-implement method self.get_delivery_status?
@@ -150,11 +150,11 @@ class GrusProjectDeliverer(ProjectDeliverer):
             # do we terminate or do we try to deliver partly?
             logger.warning('Not all the samples have been hard staged. Terminating')
             raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver), len(hard_staged_samples)))
-
+        import pdb
+        pdb.set_trace()
         try:
             pi_email = self._get_pi_email()
         except Exception, e:
-
             logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
             # print the traceback, not only error message -> isn't it something more useful?
             logger.exception(e)
@@ -169,8 +169,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             status = False
             return status
 
-        # '265' has been created from my local pc and really exists.
-        delivery_project_id = '273'
+        # create a delivery project id
+        delivery_project_id = ''
         try:
             delivery_project_id = self._create_delivery_project(pi_id)
         except Exception, e:
@@ -230,7 +230,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
 
     def _create_delivery_project(self, pi_id):
-        return '273'
         # "https://disposer.c3se.chalmers.se/supr-test/api/ngi_delivery/project/create/"
         create_project_url = self.config.get('snic_api_url_create_project')
         user = self.config.get('snic_api_user')
@@ -263,8 +262,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return delivery_id
 
     def _get_pi_id(self, pi_email):
-        return '121'
-
         get_user_url = self.config.get('snic_api_url_get_user')
         get_user_url = '{}?email={}'.format(get_user_url, pi_email)
         username = self.config.get('snic_api_user')
@@ -356,10 +353,6 @@ class GrusSampleDeliverer(SampleDeliverer):
                         and not self.force:
                     logger.info("delivery of {} is already in progress".format(
                             str(self)))
-                    return False
-                elif self.get_sample_status(sampleentry) == 'FRESH' \
-                        and not self.force:
-                    logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
                     return False
                 elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
                     logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(                            str(self), soft_stagepath))
