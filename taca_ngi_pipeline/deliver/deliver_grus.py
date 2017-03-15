@@ -38,6 +38,14 @@ class GrusProjectDeliverer(ProjectDeliverer):
         self.stagingpathhard = getattr(self, 'stagingpathhard', None)
         if self.stagingpathhard is None:
             raise AttributeError("stagingpathhard is required when delivering to GRUS")
+        self.config_snic = CONFIG.get('snic',None)
+        if self.config_snic is None:
+            raise AttributeError("snic confoguration is needed  delivering to GRUS (snic_api_url, snic_api_user, snic_api_password")
+        self.config_statusdb = CONFIG.get('statusdb',None)
+        if self.config_statusdb is None:
+            raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
+
+    
 
     def check_mover_delivery_status(self):
         # todo: maybe makes sense to re-implement method self.get_delivery_status?
@@ -150,10 +158,10 @@ class GrusProjectDeliverer(ProjectDeliverer):
             # do we terminate or do we try to deliver partly?
             logger.warning('Not all the samples have been hard staged. Terminating')
             raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver), len(hard_staged_samples)))
-        import pdb
-        pdb.set_trace()
+        
         try:
             pi_email = self._get_pi_email()
+            logger.info("email for PI for project {} found".format(self.projectid))
         except Exception, e:
             logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
             # print the traceback, not only error message -> isn't it something more useful?
@@ -163,6 +171,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
         try:
             pi_id = self._get_pi_id(pi_email)
+            logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
             logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
             logger.exception(e)
@@ -173,10 +182,13 @@ class GrusProjectDeliverer(ProjectDeliverer):
         delivery_project_id = ''
         try:
             delivery_project_id = self._create_delivery_project(pi_id)
+            logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, delivery_project_id))
         except Exception, e:
             logger.error('Cannot create delivery project. Error says: {}'.format())
             logger.exception(e)
         # if do_delivery failed, no token
+        import pdb
+        pdb.set_trace()
         delivery_token = self.do_delivery(delivery_project_id) # instead of to_outbox
 
         if delivery_token:
@@ -209,7 +221,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         output = subprocess.call('to_outbox {} {}'.format(hard_stage, delivery_project_id), shell=True)
         # if the format is this one: # id=P6968-ngi-sw-1488209917 Error: receiver 274 does not exist or has expired.
         delivery_token = output.split()[0].split('=')[-1]
-        delivery_token = 'P6968-ngi-sw-1488209917'
         return delivery_token
 
 
@@ -231,9 +242,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
     def _create_delivery_project(self, pi_id):
         # "https://disposer.c3se.chalmers.se/supr-test/api/ngi_delivery/project/create/"
-        create_project_url = self.config.get('snic_api_url_create_project')
-        user = self.config.get('snic_api_user')
-        password = self.config.get('snic_api_password')
+        create_project_url = '{}/ngi_delivery/project/create/'.format(self.config_snic.get('snic_api_url'))
+        user               = self.config_snic.get('snic_api_user')
+        password           = self.config_snic.get('snic_api_password')
         supr_date_format = '%Y-%m-%d'
         today = datetime.date.today()
         six_months_from_now = (today + relativedelta(months=+6))
@@ -252,21 +263,20 @@ class GrusProjectDeliverer(ProjectDeliverer):
             'ngi_delivery_status': ''
         }
 
-        response = requests.post(create_project_url,
-                                     data=json.dumps(data),
-                                     auth=(user, password))
+        response = requests.post(create_project_url, data=json.dumps(data), auth=(user, password))
         if response.status_code != 200:
             raise AssertionError("API returned status code {}. Response: {}. URL: {}".format(response.status_code, response.content, create_project_url))
+        result = json.loads(response.content)
         # response will look like: {"links_incoming": [], "webpage": "", "abstract": "", "affiliation": "Stockholms universitet", "directory_name": "", "id": 231, "classification3": "", "classification2": "", "classification1": "", "title": "DELIVERY_P6968_2017-02-22", "pi": {"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}, "type": "NGI Delivery", "start_date": "2017-02-22 00:00:00", "ngi_ready": false, "end_date": "2017-08-22 00:00:00", "resourceprojects": [{"allocated": 1000, "resource": {"centre": {"name": "UPPMAX", "id": 4}, "capacity_unit": "GiB", "id": 42, "name": "Grus"}, "id": 255, "allocations": [{"allocated": 1000, "start_date": "2017-02-22", "end_date": "2017-08-22", "id": 278}]}], "links_outgoing": [], "members": [{"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}], "continuation_name": "", "name": "delivery00114", "managed_in_supr": true, "modified": "2017-02-22 13:56:12", "api_opaque_data": "", "ngi_delivery_status": "", "ngi_project_name": "P6968"}
-        delivery_id = response.content.get('id')
+        delivery_id = result.get('id')
         return delivery_id
 
     def _get_pi_id(self, pi_email):
-        get_user_url = self.config.get('snic_api_url_get_user')
-        get_user_url = '{}?email={}'.format(get_user_url, pi_email)
-        username = self.config.get('snic_api_user')
-        password = self.config.get('snic_api_password')
-        response = requests.get(get_user_url, auth=(username, password))
+        get_user_url = '{}/person/search/'.format(self.config_snic.get('snic_api_url'))
+        user         = self.config_snic.get('snic_api_user')
+        password     = self.config_snic.get('snic_api_password')
+        params   = {'email_i': pi_email}
+        response = requests.get(get_user_url, params=params, auth=(user, password))
 
         if response.status_code != 200:
             raise AssertionError("Status code returned when trying to get PI id for email: {} was not 200. Response was: {}".format(pi_email, response.content))
@@ -284,10 +294,10 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
 
     def _get_pi_email(self):
-        url = CONFIG.get('statusdb', {}).get('url')
-        username = CONFIG.get('statusdb', {}).get('username')
-        password = CONFIG.get('statusdb', {}).get('password')
-        port = CONFIG.get('statusdb', {}).get('port')
+        url      = self.config_statusdb.get('url')
+        username = self.config_statusdb.get('username')
+        password = self.config_statusdb.get('password')
+        port     = self.config_statusdb.get('port')
         status_db_url = 'http://{}:{}@{}:{}'.format(username, password, url, port)
 
         status_db = couchdb.Server(status_db_url)
@@ -300,6 +310,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
 
         pi_email = rows[0].value
+        pi_email = "francesco.vezzi@scilifelab.se"
         return pi_email
 
 
