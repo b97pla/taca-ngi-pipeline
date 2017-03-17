@@ -168,8 +168,12 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.exception(e)
             status = False
             return status
-
+        pi_email = "francesco.vezzi@scilifelab.se"
+        import pdb
+        pdb.set_trace()
+        
         try:
+            #comment on irma
             pi_id = self._get_pi_id(pi_email)
             logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
@@ -177,19 +181,25 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.exception(e)
             status = False
             return status
+        pi_id = "1834"
 
         # create a delivery project id
-        delivery_project_id = ''
+        supr_name_of_delivery = ''
         try:
-            delivery_project_id = self._create_delivery_project(pi_id)
+            #comment on irma
+            delivery_project_info = self._create_delivery_project(pi_id)
+            supr_name_of_delivery = delivery_project_info['name']
             logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, delivery_project_id))
         except Exception, e:
             logger.error('Cannot create delivery project. Error says: {}'.format())
             logger.exception(e)
-        # if do_delivery failed, no token
-        import pdb
-        pdb.set_trace()
-        delivery_token = self.do_delivery(delivery_project_id) # instead of to_outbox
+        # if do_delivery failed, no token handle this case...
+        log.info("Will now sleep for 1 h and 15 min while waiting for Uppmax to sync the projects from Supr...")
+        #time.sleep(60*75)
+        
+        supr_name_of_delivery = 'delivery00009'
+        
+        delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
 
         if delivery_token:
             # todo: save delivery_token in Charon
@@ -267,9 +277,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
         if response.status_code != 200:
             raise AssertionError("API returned status code {}. Response: {}. URL: {}".format(response.status_code, response.content, create_project_url))
         result = json.loads(response.content)
+        return result
         # response will look like: {"links_incoming": [], "webpage": "", "abstract": "", "affiliation": "Stockholms universitet", "directory_name": "", "id": 231, "classification3": "", "classification2": "", "classification1": "", "title": "DELIVERY_P6968_2017-02-22", "pi": {"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}, "type": "NGI Delivery", "start_date": "2017-02-22 00:00:00", "ngi_ready": false, "end_date": "2017-08-22 00:00:00", "resourceprojects": [{"allocated": 1000, "resource": {"centre": {"name": "UPPMAX", "id": 4}, "capacity_unit": "GiB", "id": 42, "name": "Grus"}, "id": 255, "allocations": [{"allocated": 1000, "start_date": "2017-02-22", "end_date": "2017-08-22", "id": 278}]}], "links_outgoing": [], "members": [{"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}], "continuation_name": "", "name": "delivery00114", "managed_in_supr": true, "modified": "2017-02-22 13:56:12", "api_opaque_data": "", "ngi_delivery_status": "", "ngi_project_name": "P6968"}
-        delivery_id = result.get('id')
-        return delivery_id
+
 
     def _get_pi_id(self, pi_email):
         get_user_url = '{}/person/search/'.format(self.config_snic.get('snic_api_url'))
@@ -310,7 +320,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
             raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
 
         pi_email = rows[0].value
-        pi_email = "francesco.vezzi@scilifelab.se"
         return pi_email
 
 
