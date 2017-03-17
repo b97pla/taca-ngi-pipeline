@@ -169,12 +169,11 @@ class GrusProjectDeliverer(ProjectDeliverer):
             status = False
             return status
         pi_email = "francesco.vezzi@scilifelab.se"
-        import pdb
-        pdb.set_trace()
-        
+
+        pi_id = ''
         try:
             #comment on irma
-            pi_id = self._get_pi_id(pi_email)
+            #pi_id = self._get_pi_id(pi_email)
             logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
             logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
@@ -187,18 +186,20 @@ class GrusProjectDeliverer(ProjectDeliverer):
         supr_name_of_delivery = ''
         try:
             #comment on irma
-            delivery_project_info = self._create_delivery_project(pi_id)
-            supr_name_of_delivery = delivery_project_info['name']
-            logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, delivery_project_id))
+            #delivery_project_info = self._create_delivery_project(pi_id)
+            #supr_name_of_delivery = delivery_project_info['name']
+            logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, supr_name_of_delivery))
         except Exception, e:
             logger.error('Cannot create delivery project. Error says: {}'.format())
             logger.exception(e)
         # if do_delivery failed, no token handle this case...
-        log.info("Will now sleep for 1 h and 15 min while waiting for Uppmax to sync the projects from Supr...")
+        logger.info("Will now sleep for 1 h and 15 min while waiting for Uppmax to sync the projects from Supr...")
         #time.sleep(60*75)
         
         supr_name_of_delivery = 'delivery00009'
         
+        import pdb
+        pdb.set_trace()
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
 
         if delivery_token:
@@ -224,11 +225,27 @@ class GrusProjectDeliverer(ProjectDeliverer):
         charon_session = CharonSession()
         charon_session.project_update(self.projectid, delivery_token='')
 
-    def do_delivery(self, delivery_project_id):
+    def do_delivery(self, supr_name_of_delivery):
         # this one returns error : "265 is non-existing at /usr/local/bin/to_outbox line 214". (265 is delivery_project_id, created via api)
         # or: id=P6968-ngi-sw-1488209917 Error: receiver 274 does not exist or has expired.
         hard_stage = self.expand_path(self.stagingpathhard)
-        output = subprocess.call('to_outbox {} {}'.format(hard_stage, delivery_project_id), shell=True)
+        #need to change group to all files
+        os.chown(hard_stage, -1, 47537)
+        for root, dirs, files in os.walk(hard_stage):
+            for dir in dirs:
+                dir_path = os.path.join(root, dir)
+                os.chown(dir_path, -1, 47537) #gr_id is the one of ngi2016003
+            for file in files:
+                fname = os.path.join(root, file)
+                os.chown(fname, -1, 47537)
+        import pdb
+        pdb.set_trace()
+        
+        ##this one is JOhan code... check how to parse it
+        cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
+        output = subprocess.check_output(cmd)
+        
+        output = subprocess.call('to_outbox {} {}'.format(hard_stage, supr_name_of_delivery), shell=True)
         # if the format is this one: # id=P6968-ngi-sw-1488209917 Error: receiver 274 does not exist or has expired.
         delivery_token = output.split()[0].split('=')[-1]
         return delivery_token
@@ -375,7 +392,7 @@ class GrusSampleDeliverer(SampleDeliverer):
                             str(self)))
                     return False
                 elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
-                    logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(                            str(self), soft_stagepath))
+                    logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(str(self), soft_stagepath))
                     return False
                 elif self.get_delivery_status(sampleentry) == 'FAILED':
                         logger.info("retrying delivery of previously failed sample {}".format(str(self)))
@@ -386,7 +403,7 @@ class GrusSampleDeliverer(SampleDeliverer):
                 exit(1)
             #at this point copywith deferance the softlink folder
             self.update_delivery_status(status="IN_PROGRESS")
-            #call do_delivery
+            self.do_delivery()
         #in case of faiulure put again the status to STAGED
         except DelivererInterruptedError, e:
             self.update_delivery_status(status="STAGED")
