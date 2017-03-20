@@ -171,35 +171,32 @@ class GrusProjectDeliverer(ProjectDeliverer):
         pi_email = "francesco.vezzi@scilifelab.se"
 
         pi_id = ''
+        import pdb
+        pdb.set_trace()
         try:
             #comment on irma
-            #pi_id = self._get_pi_id(pi_email)
+            pi_id = self._get_pi_id(pi_email)
             logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
             logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
             logger.exception(e)
             status = False
             return status
-        pi_id = "1834"
 
         # create a delivery project id
         supr_name_of_delivery = ''
         try:
             #comment on irma
-            #delivery_project_info = self._create_delivery_project(pi_id)
-            #supr_name_of_delivery = delivery_project_info['name']
+            delivery_project_info = self._create_delivery_project(pi_id)
+            supr_name_of_delivery = delivery_project_info['name']
             logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, supr_name_of_delivery))
         except Exception, e:
             logger.error('Cannot create delivery project. Error says: {}'.format())
             logger.exception(e)
         # if do_delivery failed, no token handle this case...
         logger.info("Will now sleep for 1 h and 15 min while waiting for Uppmax to sync the projects from Supr...")
-        #time.sleep(60*75)
+        time.sleep(60*75)
         
-        supr_name_of_delivery = 'delivery00009'
-        
-        import pdb
-        pdb.set_trace()
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
 
         if delivery_token:
@@ -243,10 +240,10 @@ class GrusProjectDeliverer(ProjectDeliverer):
         
         ##this one is JOhan code... check how to parse it
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
-        output = subprocess.check_output(cmd)
         
-        output = subprocess.call('to_outbox {} {}'.format(hard_stage, supr_name_of_delivery), shell=True)
-        # if the format is this one: # id=P6968-ngi-sw-1488209917 Error: receiver 274 does not exist or has expired.
+        output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        "result looks like this"
+        "'id=P6968-ngi2016003-1490007371 Found receiver delivery00009 with end date: 2017-09-17\nP6968 queued for delivery to delivery00009, id = P6968-ngi2016003-1490007371\n'"
         delivery_token = output.split()[0].split('=')[-1]
         return delivery_token
 
@@ -274,13 +271,13 @@ class GrusProjectDeliverer(ProjectDeliverer):
         password           = self.config_snic.get('snic_api_password')
         supr_date_format = '%Y-%m-%d'
         today = datetime.date.today()
-        six_months_from_now = (today + relativedelta(months=+6))
+        three_months_from_now = (today + relativedelta(months=+3))
         data = {
             'ngi_project_name': self.projectid,
             'title': "DELIVERY_{}_{}".format(self.projectid, today.strftime(supr_date_format)),
             'pi_id': pi_id,
             'start_date': today.strftime(supr_date_format),
-            'end_date': six_months_from_now.strftime(supr_date_format),
+            'end_date': three_months_from_now.strftime(supr_date_format),
             'continuation_name': '',
             # You can use this field to allocate the size of the delivery
             # 'allocated': size_of_delivery,
