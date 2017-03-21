@@ -122,9 +122,16 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.error("In {} found already folder {}. No multiple mover deliveries are allowed".format(
                     hard_stagepath, self.projectid))
             raise DelivererInterruptedError("Hard Staged Folder already present")
-        else:
-            #otherwise lock the delivery by creating the folder
-            create_folder(hard_stagepath)
+        #check that this project is not under delivery with mover already in this case stop delivery
+        delivery_token = self.get_delivery_token_in_charon()
+        if delivery_token is not None:
+            logger.error("Project {} is already under delivery {}. No multiple mover deliveries are allowed".format(
+                    self.projectid, delivery_token))
+            raise DelivererInterruptedError("Proejct already under delivery with Mover")
+        
+        
+        #otherwise lock the delivery by creating the folder
+        create_folder(hard_stagepath)
         logger.info("Delivering {} to GRUS".format(str(self)))
         if self.get_delivery_status() == 'DELIVERED' \
                 and not self.force:
@@ -171,8 +178,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         pi_email = "francesco.vezzi@scilifelab.se"
 
         pi_id = ''
-        import pdb
-        pdb.set_trace()
         try:
             #comment on irma
             pi_id = self._get_pi_id(pi_email)
@@ -195,8 +200,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.exception(e)
         # if do_delivery failed, no token handle this case...
         logger.info("Will now sleep for 1 h and 15 min while waiting for Uppmax to sync the projects from Supr...")
-        time.sleep(60*75)
-        
+
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
 
         if delivery_token:
@@ -221,6 +225,16 @@ class GrusProjectDeliverer(ProjectDeliverer):
         '''
         charon_session = CharonSession()
         charon_session.project_update(self.projectid, delivery_token='')
+    
+    def get_delivery_token_in_charon(self):
+        '''fetches delivery_token from Charon
+        '''
+        charon_session = CharonSession()
+        project_charon = charon_session.project_get(self.projectid)
+        if project_charon.get('delivery_token'):
+            return project_charon.get('delivery_token')
+        else:
+            return None
 
     def do_delivery(self, supr_name_of_delivery):
         # this one returns error : "265 is non-existing at /usr/local/bin/to_outbox line 214". (265 is delivery_project_id, created via api)
@@ -235,11 +249,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
             for file in files:
                 fname = os.path.join(root, file)
                 os.chown(fname, -1, 47537)
-        import pdb
-        pdb.set_trace()
-        
         ##this one is JOhan code... check how to parse it
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
+        
         
         output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         "result looks like this"
