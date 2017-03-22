@@ -45,21 +45,36 @@ class GrusProjectDeliverer(ProjectDeliverer):
         if self.config_statusdb is None:
             raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
 
-    
+
+    def get_delivery_status(self, dbentry=None):
+        """ Returns the delivery status for this sample. If a sampleentry
+        dict is supplied, it will be used instead of fethcing from database
+        
+        :params sampleentry: a database sample entry to use instead of
+        fetching from db
+        :returns: the delivery status of this sample as a string
+        """
+        dbentry = dbentry or self.db_entry()
+        if dbentry.get('delivery_token'):
+            return 'IN_PROGRESS'
+        else:
+            return 'NOT_DELIVERED'
 
     def check_mover_delivery_status(self):
-        # todo: maybe makes sense to re-implement method self.get_delivery_status?
-
         # calling super class method
-        charon_status = super(GrusProjectDeliverer, self).get_delivery_status()
+        charon_status = self.get_delivery_status()
         # we don't care if delivery is not in progress
         if charon_status != 'IN_PROGRESS':
-            return charon_status
-
+            logger.info("Project {} has no delivery token. Project is not being delivered at the moment".format(self.projectid))
+            return
         # if it's 'IN_PROGRESS', checking moverinfo
         delivery_token = self.db_entry().get('delivery_token')
+        logger.info("Project {} under delivery. Delivery token is {}".format(self.projectid, delivery_token))
+        import pdb; pdb.set_trace()
+
         try:
-            mover_status = subprocess.call('moverinfo -i {}'.format(delivery_token), shell=True)
+            cmd = ['moverinfo', '-i', delivery_token]
+            output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         except Exception, e:
             logger.error('Cannot get the delivery status for project {}'.format(self.projectid))
             # write Traceback to the log file
@@ -67,44 +82,35 @@ class GrusProjectDeliverer(ProjectDeliverer):
             # we do not raise, but exit(1). Traceback will be written to log.
             exit(1)
         else:
-            # I don't know what mover_status will look like, but for example 'DELIVERED', 'IN_PROGRESS' and 'FAILED'
-            if mover_status == 'DELIVERED':
-                # check the filesystem anyway
-                if os.path.exists(self.stagingpathhard):
-                    logger.error('moverinfo returned status "DELIVERED", but the project folder still exists in DELIVERY_HARD')
-                    logger.info('Updating status in Charon: FAILED')
-                    # make sure it updates all the samples
-                    # but we don't know for which samples we started the delivery
-                    self.update_delivery_status('FAILED')
-                    self.delete_delivery_token_in_charon()
-                    return 'FAILED'
-                else:
-                    self.update_delivery_status('DELIVERED') # implemented
-                    self.delete_delivery_token_in_charon()   # implemented
-                    self.send_email()                        # not implemented
-                    return 'DELIVERED'
-            elif mover_status == 'FAILED':
-                self.update_delivery_status('FAILED') # implemented
-                self.delete_delivery_token_in_charon()   # implemented
-                # todo: to implement this
-                self.send_email()                        # not implemented
-                return 'FAILED'
-            elif mover_status == 'IN_PROGRESS':
+            #Moverinfo output with option -i can be: InProgress, Accepted, Failed,
+            mover_status = output.split(':')[0]
+            if mover_status == 'InProgress' or mover_status == 'Accepted' or mover_status == 'Failed':
                 # this is not in Charon yet, talk to Denis
-                delivery_started = parser.parse(self.db_entry().get('delivery_started'))
-                # alternative way: checking when the folder was created
-                # delivery_started = datetime.datetime.fromtimestamp(os.path.getctime(path))
-                today = datetime.datetime.now()
-                if delivery_started + relativedelta(days=7) >= today:
-                    logger.warning('Delivery has been ongoing for more than 7 days. Project will be marked as "FAILED"')
-                    self.update_delivery_status('FAILED')
+                if self.db_entry().get('delivery_started'):
+                    delivery_started = self.db_entry().get('delivery_started')
+                else:
+                    delivery_started = datetime.datetime.now() - relativedelta(days=7) #fake a time just to test
+                now = datetime.datetime.now()
+                if delivery_started + relativedelta(days=1) > now:
+                    logger.error('Delivery {} for project {} has been ongoing for more than 24 hours. Check wht is going on. The project status will be reset'.format(delivery_token, self.projectid))
+                    #all samples that were in IN_PROGRESS need to be marked as Failed or not????
                     self.delete_delivery_token_in_charon()
-                    # todo: to implement this
-                    self.send_email()
                     return 'FAILED'
                 else:
                     # do nothing
+                    logger.info("Project {} under delivery. Delivery token is {}: so far so good.".format(self.projectid, delivery_token))
                     return 'IN_PROGRESS'
+            if mover_status == 'Delivered':
+                # check the filesystem anyway
+                if os.path.exists(self.expand_path(self.stagingpathhard)):
+                    logger.error('Delivery {} for project {} develered done but project folder found in DELIVERY_HARD. Failing delivery.'.format(delivery_token, self.projectid))
+                    # make sure it updates all the samples
+                    self.delete_delivery_token_in_charon()
+                    return 'FAILED'
+                else:
+                    #update samples as delivered
+                    self.delete_delivery_token_in_charon()   # implemented
+                    return 'DELIVERED'
 
 
 
@@ -223,6 +229,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
     def delete_delivery_token_in_charon(self):
         '''Removes delivery_token from Charon upon successful delivery
         '''
+        #TODO: take care here also of the delivery_date
         charon_session = CharonSession()
         charon_session.project_update(self.projectid, delivery_token='')
     
@@ -249,10 +256,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             for file in files:
                 fname = os.path.join(root, file)
                 os.chown(fname, -1, 47537)
-        ##this one is JOhan code... check how to parse it
+        ##this one is Johan code... check how to parse it
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
-        
-        
         output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         "result looks like this"
         "'id=P6968-ngi2016003-1490007371 Found receiver delivery00009 with end date: 2017-09-17\nP6968 queued for delivery to delivery00009, id = P6968-ngi2016003-1490007371\n'"

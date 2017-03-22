@@ -154,28 +154,19 @@ def _exec_fn(obj, fn):
                 str(obj), str(e), obj.config.get('operator')))
 
 
+
+
 @deliver.command()
 @click.pass_context
-@click.argument('projectid', required=False, default=None)
-def check_status(context, projectid=None):
-    import pdb; pdb.set_trace()
-    # how do we access config file??
-    stagingpathhard = CONFIG.get('deliver', {}).get('stagingpathhard')
-
-    if stagingpathhard is None:
-        logger.error('Config file requires "stagingpathhard"!!')
-        exit(1)
-
-    # doing stupid stuff - creating whatever random project, just to get the path to DELIVERY_HARD
-    stagingpathhard = _deliver.ProjectDeliverer('P4601').expand_path(stagingpathhard)
-    stagingpathhard = os.path.abspath(os.path.join(stagingpathhard, '..'))
-
-    # if project specified, check only this project, otherwise all projects from stagingpathhard
-    projects = [projectid] if projectid is not None else os.listdir(stagingpathhard)
-
-    for projectid in projects:
-        GrusProjectDeliverer(projectid).check_mover_delivery_status()
-
+@click.argument('projectid', type=click.STRING, nargs=-1)
+def check_status(ctx, projectid):
+    """In grus delivery mode checks the status of an onggoing delivery
+    """
+    for pid in projectid:
+        d = _deliver_grus.GrusProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        d.check_mover_delivery_status()
 
 
 
