@@ -32,12 +32,14 @@ logger = logging.getLogger(__name__)
               help="Email address to notify operator at. Multiple operators can be specified")
 @click.option('--stage_only', is_flag=True, default=False,
               help="Only stage the delivery but do not transfer any files")
+@click.option('--ignore-analysis-status', is_flag=True, default=False,
+              help="Do not check analysis status upon delivery. To be used only when delivering projects without BP (e.g., WHG)")
 @click.option('--force', is_flag=True, default=False,
               help="Force delivery, even if e.g. analysis has not finished or sample has already been delivered")
 @click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca', 'grus']),
               help="Specify to which cluster one wants to deliver")
 
-def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster):
+def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster, ignore_analysis_status):
     """ Deliver methods entry point
     """
     if deliverypath is None:

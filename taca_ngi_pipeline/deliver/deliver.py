@@ -87,6 +87,7 @@ class Deliverer(object):
         self.reportpath = getattr(self, 'reportpath', None)
         self.force = getattr(self, 'force', False)
         self.stage_only = getattr(self, 'stage_only', False)
+        self.ignore_analysis_status = getattr(self, 'ignore_analysis_status', False)
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             getattr(self, 'uppnexid')
@@ -529,10 +530,10 @@ class SampleDeliverer(Deliverer):
             else:
                 logger.info("Staging {}".format(str(self)))
             try:
-                if self.get_analysis_status(sampleentry) != 'ANALYZED' \
-                        and not self.force:
-                    logger.info("{} has not finished analysis and will not be delivered".format(str(self)))
-                    return False
+                if self.get_analysis_status(sampleentry) != 'ANALYZED':
+                    if not self.force and not self.ignore_analysis_status:
+                        logger.info("{} has not finished analysis and will not be delivered".format(str(self)))
+                        return False
                 if self.get_delivery_status(sampleentry) == 'DELIVERED' \
                         and not self.force:
                     logger.info("{} has already been delivered".format(str(self)))
