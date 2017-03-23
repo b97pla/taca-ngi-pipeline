@@ -56,12 +56,13 @@ class GrusProjectDeliverer(ProjectDeliverer):
         """
         dbentry = dbentry or self.db_entry()
         if dbentry.get('delivery_token'):
+            if dbentry.get('delivery_token') == 'NO-TOKEN':
+                return 'NOT_DELIVERED'
             return 'IN_PROGRESS'
         else:
             return 'NOT_DELIVERED'
 
     def check_mover_delivery_status(self):
-        # calling super class method
         charon_status = self.get_delivery_status()
         # we don't care if delivery is not in progress
         if charon_status != 'IN_PROGRESS':
@@ -71,7 +72,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         delivery_token = self.db_entry().get('delivery_token')
         logger.info("Project {} under delivery. Delivery token is {}".format(self.projectid, delivery_token))
         import pdb; pdb.set_trace()
-
+        delivery_status = 'IN_PROGRESS'
         try:
             cmd = ['moverinfo', '-i', delivery_token]
             output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
@@ -93,24 +94,41 @@ class GrusProjectDeliverer(ProjectDeliverer):
                 now = datetime.datetime.now()
                 if delivery_started + relativedelta(days=1) > now:
                     logger.error('Delivery {} for project {} has been ongoing for more than 24 hours. Check wht is going on. The project status will be reset'.format(delivery_token, self.projectid))
-                    #all samples that were in IN_PROGRESS need to be marked as Failed or not????
-                    self.delete_delivery_token_in_charon()
-                    return 'FAILED'
+                    delivery_status = 'FAILED'
                 else:
                     # do nothing
                     logger.info("Project {} under delivery. Delivery token is {}: so far so good.".format(self.projectid, delivery_token))
-                    return 'IN_PROGRESS'
             if mover_status == 'Delivered':
                 # check the filesystem anyway
                 if os.path.exists(self.expand_path(self.stagingpathhard)):
-                    logger.error('Delivery {} for project {} develered done but project folder found in DELIVERY_HARD. Failing delivery.'.format(delivery_token, self.projectid))
-                    # make sure it updates all the samples
-                    self.delete_delivery_token_in_charon()
-                    return 'FAILED'
+                    logger.error('Delivery {} for project {} delivered done but project folder found in DELIVERY_HARD. Failing delivery.'.format(delivery_token, self.projectid))
+                    # updates all the samples that were IN_PROGRESS
+                    delivery_status =  'FAILED'
                 else:
                     #update samples as delivered
-                    self.delete_delivery_token_in_charon()   # implemented
-                    return 'DELIVERED'
+                    logger.info("Project {} succefully delivered. Delivery token is {}.".format(self.projectid, delivery_token))
+                    delivery_status = 'DELIVERED'
+            else:
+                logger.error('Delivery {} for project {} returned with unexpected status \{. Failing delivery.'.format(delivery_token,
+                                                            self.projectid,
+                                                            mover_status))
+                delivery_status =  'FAILED'
+                
+        if delivery_status == 'DELIVERED' or delivery_status == 'FAILED':
+            #fetch all samples that were under delivery
+            in_progress_samples = self.get_samples_from_charon(delivery_status="IN_PROGRESS")
+            # now update them
+            for sample_id in in_progress_samples:
+                try:
+                    sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
+                    sample_deliverer.update_delivery_status(status=delivery_status)
+                except Exception, e:
+                    logger.error('Sample {}: Problems in setting sample status on charon. Error: {}'.format(sample_id, error))
+                    logger.exception(e)
+            #now reset delivery
+            self.delete_delivery_token_in_charon()
+            #now check, if all samples in charon are DELIVERED or are ABORTED as status, then the all projecct is DELIVERED
+            
 
 
 
@@ -134,24 +152,21 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.error("Project {} is already under delivery {}. No multiple mover deliveries are allowed".format(
                     self.projectid, delivery_token))
             raise DelivererInterruptedError("Proejct already under delivery with Mover")
-        
-        
-        #otherwise lock the delivery by creating the folder
-        create_folder(hard_stagepath)
         logger.info("Delivering {} to GRUS".format(str(self)))
         if self.get_delivery_status() == 'DELIVERED' \
                 and not self.force:
             logger.info("{} has already been delivered".format(str(self)))
             return True
         status = True
+        #otherwise lock the delivery by creating the folder
+        create_folder(hard_stagepath)
+        # connect to charon, return list of sample objects that have been staged
         try:
-            # connect to charon, return list of sample objects
-            samples_to_deliver = self.get_staged_samples_from_charon()
+            samples_to_deliver = self.get_samples_from_charon(delivery_status="STAGED")
         except Exception, e:
             logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
             logger.exception(e)
             exit(1)
-
         if len(samples_to_deliver) == 0:
             logger.warning('No staged samples found in Charon')
             raise AssertionError('No staged samples found in Charon')
@@ -204,18 +219,14 @@ class GrusProjectDeliverer(ProjectDeliverer):
         except Exception, e:
             logger.error('Cannot create delivery project. Error says: {}'.format())
             logger.exception(e)
-        # if do_delivery failed, no token handle this case...
-        logger.info("Will now sleep for 1 h and 15 min while waiting for Uppmax to sync the projects from Supr...")
 
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
-
         if delivery_token:
             # todo: save delivery_token in Charon
             self.save_delivery_token_in_charon(delivery_token)
         else:
             logger.error('Delivery project has not been created')
             status = False
-
         return status
 
     def save_delivery_token_in_charon(self, delivery_token):
@@ -231,7 +242,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         '''
         #TODO: take care here also of the delivery_date
         charon_session = CharonSession()
-        charon_session.project_update(self.projectid, delivery_token='')
+        charon_session.project_update(self.projectid, delivery_token='NO-TOKEN')
     
     def get_delivery_token_in_charon(self):
         '''fetches delivery_token from Charon
@@ -265,20 +276,21 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return delivery_token
 
 
-    def get_staged_samples_from_charon(self):
+    def get_samples_from_charon(self, delivery_status='STAGED'):
+        """Takes as input a delivery status and return all samples with that delivery status
+        """
         charon_session = CharonSession()
         result = charon_session.project_get_samples(self.projectid)
         samples = result.get('samples')
         if samples is None:
             raise AssertionError('CharonSession returned no results for project {}'.format(self.projectid))
-
-        staged_samples = []
+        samples_of_interest = []
         for sample in samples:
             sample_id = sample.get('sampleid')
-            delivery_status = sample.get('delivery_status')
-            if delivery_status == 'STAGED':
-                staged_samples.append(sample_id)
-        return staged_samples
+            cahron_delivery_status = sample.get('delivery_status')
+            if cahron_delivery_status == delivery_status:
+                samples_of_interest.append(sample_id)
+        return samples_of_interest
 
 
     def _create_delivery_project(self, pi_id):
@@ -389,32 +401,17 @@ class GrusSampleDeliverer(SampleDeliverer):
         soft_stagepath = self.expand_path(self.stagingpath)
 
         try:
-            logger.info("Delivering {} to GRUS with MOVER!!!!!".format(str(self)))
+            logger.info("Trying to deliver {} to GRUS with MOVER".format(str(self)))
             hard_stagepath = self.expand_path(self.stagingpathhard)
             soft_stagepath = self.expand_path(self.stagingpath)
             try:
                 if self.get_delivery_status(sampleentry) != 'STAGED':
-                    logger.info("{} has not been stages and will not be delivered".format(str(self)))
+                    logger.info("{} has not been staged and will not be delivered".format(str(self)))
                     return False
-                if self.get_delivery_status(sampleentry) == 'DELIVERED' \
-                        and not self.force:
-                    logger.info("{} has already been delivered".format(str(self)))
-                    return True
-                elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
-                        and not self.force:
-                    logger.info("delivery of {} is already in progress".format(
-                            str(self)))
-                    return False
-                elif not os.path.exists(os.path.join(soft_stagepath,self.sampleid)):
-                    logger.info("Sample {} marked as STAGED on charon but not found in the soft stage dir {}".format(str(self), soft_stagepath))
-                    return False
-                elif self.get_delivery_status(sampleentry) == 'FAILED':
-                        logger.info("retrying delivery of previously failed sample {}".format(str(self)))
             except db.DatabaseError as e:
-                logger.error("error '{}' occurred during delivery of {}".format(
-                        str(e), str(self)))
+                logger.error("error '{}' occurred during delivery of {}".format(str(e), str(self)))
                 logger.exception(e)
-                exit(1)
+                raise(e)
             #at this point copywith deferance the softlink folder
             self.update_delivery_status(status="IN_PROGRESS")
             self.do_delivery()
@@ -422,40 +419,21 @@ class GrusSampleDeliverer(SampleDeliverer):
         except DelivererInterruptedError, e:
             self.update_delivery_status(status="STAGED")
             logger.exception(e)
-            exit(1)
+            raise(e)
         except Exception, e:
             self.update_delivery_status(status="STAGED")
             logger.exception(e)
-            exit(1) # or raise, whatever. But I'd prefer exit(1)
+            raise(e)
 
 
     def do_delivery(self):
         """ Creating a hard copy of staged data
-            :returns: True if delivery was successful, False if unsuccessful
-            :raises DelivererTOBEDEFINEDError: if an exception occurred when creating a hard copy
         """
-
         logger.info("Creating hard copy of sample {}".format(self.sampleid))
-
-        # try:
-            # stagingpath is a project directory
         # join stage dir with sample dir
         source = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
         destination = os.path.join(self.expand_path(self.stagingpathhard), self.sampleid)
-
         # destination must NOT exist
-        # if it's already exists, we can:
-        # 1. mover is currently moving data -> throw an error
-        # 2. we delete folder and create a new copy
         do_copy(source, destination)
-
-
-        # except Exception as e:
-            # logger.error('Caught exception: {}: {}'.format(e.__class__, e))
-            # logger.exception(e)
-            # exit(1)
-
         logger.info("Sample {} has been hard staged to {}".format(self.sampleid, destination))
-
-        # if something went wrong we got an exception before
-        return True
+        return
