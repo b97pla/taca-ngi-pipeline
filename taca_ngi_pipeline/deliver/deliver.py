@@ -88,13 +88,17 @@ class Deliverer(object):
         self.force = getattr(self, 'force', False)
         self.stage_only = getattr(self, 'stage_only', False)
         self.ignore_analysis_status = getattr(self, 'ignore_analysis_status', False)
+        #Fetches a project name, should always be availble; but is not a requirement
+        try:
+            self.projectname = db.project_entry(db.dbcon(), projectid)['name']
+        except KeyError:
+            pass
         # only set an attribute for uppnexid if it's actually given or in the db
         try:
             getattr(self, 'uppnexid')
         except AttributeError:
             try:
-                t = db.project_entry(db.dbcon(), projectid)['uppnex_id']
-                self.uppnexid = t
+                self.uppnexid = db.project_entry(db.dbcon(), projectid)['uppnex_id']
             except KeyError:
                 pass
         # set a custom signal handler to intercept interruptions
