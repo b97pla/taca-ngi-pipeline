@@ -63,6 +63,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             return 'NOT_DELIVERED'
 
     def check_mover_delivery_status(self):
+        """ This functions checks is project is under delivery. If so it waits until projects is delivered or a certain threshold is met
+        """
         charon_status = self.get_delivery_status()
         # we don't care if delivery is not in progress
         if charon_status != 'IN_PROGRESS':
@@ -70,51 +72,60 @@ class GrusProjectDeliverer(ProjectDeliverer):
             return
         # if it's 'IN_PROGRESS', checking moverinfo
         delivery_token = self.db_entry().get('delivery_token')
-        logger.info("Project {} under delivery. Delivery token is {}".format(self.projectid, delivery_token))
-        import pdb; pdb.set_trace()
+        logger.info("Project {} under delivery. Delivery token is {}. Starting monitoring:".format(self.projectid, delivery_token))
         delivery_status = 'IN_PROGRESS'
-        try:
-            cmd = ['moverinfo', '-i', delivery_token]
-            output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        except Exception, e:
-            logger.error('Cannot get the delivery status for project {}'.format(self.projectid))
-            # write Traceback to the log file
-            logger.exception(e)
-            # we do not raise, but exit(1). Traceback will be written to log.
-            exit(1)
-        else:
-            #Moverinfo output with option -i can be: InProgress, Accepted, Failed,
-            mover_status = output.split(':')[0]
-            if mover_status == 'InProgress' or mover_status == 'Accepted' or mover_status == 'Failed':
-                # this is not in Charon yet, talk to Denis
-                if self.db_entry().get('delivery_started'):
-                    delivery_started = self.db_entry().get('delivery_started')
-                else:
-                    delivery_started = datetime.datetime.now() - relativedelta(days=7) #fake a time just to test
-                now = datetime.datetime.now()
-                if delivery_started + relativedelta(days=1) > now:
-                    logger.error('Delivery {} for project {} has been ongoing for more than 24 hours. Check wht is going on. The project status will be reset'.format(delivery_token, self.projectid))
-                    delivery_status = 'FAILED'
-                else:
-                    # do nothing
-                    logger.info("Project {} under delivery. Delivery token is {}: so far so good.".format(self.projectid, delivery_token))
-            if mover_status == 'Delivered':
-                # check the filesystem anyway
-                if os.path.exists(self.expand_path(self.stagingpathhard)):
-                    logger.error('Delivery {} for project {} delivered done but project folder found in DELIVERY_HARD. Failing delivery.'.format(delivery_token, self.projectid))
-                    # updates all the samples that were IN_PROGRESS
-                    delivery_status =  'FAILED'
-                else:
-                    #update samples as delivered
-                    logger.info("Project {} succefully delivered. Delivery token is {}.".format(self.projectid, delivery_token))
-                    delivery_status = 'DELIVERED'
+        not_monitoring = False
+        max_delivery_time = relativedelta(days=2)
+        monitoring_start = datetime.datetime.now()
+        while ( not not_monitoring ):
+            try:
+                cmd = ['moverinfo', '-i', delivery_token]
+                output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            except Exception, e:
+                logger.error('Cannot get the delivery status for project {}'.format(self.projectid))
+                # write Traceback to the log file
+                logger.exception(e)
+                # we do not raise, but exit(1). Traceback will be written to log.
+                exit(1)
             else:
-                logger.error('Delivery {} for project {} returned with unexpected status \{. Failing delivery.'.format(delivery_token,
-                                                            self.projectid,
-                                                            mover_status))
-                delivery_status =  'FAILED'
-                
+                #Moverinfo output with option -i can be: InProgress, Accepted, Failed,
+                mover_status = output.split(':')[0]
+                if mover_status == 'Delivered':
+                    # check the filesystem anyway
+                    if os.path.exists(self.expand_path(self.stagingpathhard)):
+                        logger.error('Delivery {} for project {} delivered done but project folder found in DELIVERY_HARD. Failing delivery.'.format(delivery_token, self.projectid))
+                        delivery_status =  'FAILED'
+                    else:
+                        logger.info("Project {} succefully delivered. Delivery token is {}.".format(self.projectid, delivery_token))
+                        delivery_status = 'DELIVERED'
+                    not_monitoring = True #stop the monitoring, it is either failed or delivered
+                    continue
+                else:
+                    #check for how long time delivery has been going on
+                    if self.db_entry().get('delivery_started'):
+                        delivery_started = self.db_entry().get('delivery_started')
+                    else:
+                        delivery_started = monitoring_start #the first time I checked the status, not necessarly when it begun
+                    now = datetime.datetime.now()
+                    if now -  max_delivery_time > delivery_started:
+                        logger.error('Delivery {} for project {} has been ongoing for more than 48 hours. Check what the f**k is going on. The project status will be reset'.format(delivery_token, self.projectid))
+                        delivery_status = 'FAILED'
+                        not_monitoring = True #stop the monitoring, it is taking too long
+                        continue
+                if  mover_status == 'Accepted':
+                    logger.info("Project {} under delivery. Status for delivery-token {} is : {}".format(self.projectid, delivery_token, mover_status))
+                if mover_status == 'Failed':
+                    logger.warn("Project {} under delivery (attention mover returned {}). Status for delivery-token {} is : {}".format(self.projectid, mover_status, delivery_token, mover_status))
+                elif mover_status != 'InProgress':
+                    #this is an error because it is a new status
+                    logger.info("Project {} under delivery. Status for delivery-token {} is : {}".format(self.projectid, delivery_token, mover_status))
+                else:
+                    logger.warn("Project {} under delivery. Unexpected status-delivery returned by mover for delivery-token {}: {}".format(self.projectid, delivery_token, mover_status))
+            time.sleep(60*15) #sleep for 15 minutes and then check again the status
+        #I am here only if not_monitoring is True, that is only if mover status was delivered or the delivery is ongoing for more than 48h
         if delivery_status == 'DELIVERED' or delivery_status == 'FAILED':
+            import pdb
+            pdb.set_trace()
             #fetch all samples that were under delivery
             in_progress_samples = self.get_samples_from_charon(delivery_status="IN_PROGRESS")
             # now update them
