@@ -114,18 +114,16 @@ class GrusProjectDeliverer(ProjectDeliverer):
                         continue
                 if  mover_status == 'Accepted':
                     logger.info("Project {} under delivery. Status for delivery-token {} is : {}".format(self.projectid, delivery_token, mover_status))
-                if mover_status == 'Failed':
+                elif mover_status == 'Failed':
                     logger.warn("Project {} under delivery (attention mover returned {}). Status for delivery-token {} is : {}".format(self.projectid, mover_status, delivery_token, mover_status))
-                elif mover_status != 'InProgress':
+                elif mover_status == 'InProgress':
                     #this is an error because it is a new status
                     logger.info("Project {} under delivery. Status for delivery-token {} is : {}".format(self.projectid, delivery_token, mover_status))
                 else:
                     logger.warn("Project {} under delivery. Unexpected status-delivery returned by mover for delivery-token {}: {}".format(self.projectid, delivery_token, mover_status))
-            time.sleep(60*15) #sleep for 15 minutes and then check again the status
+            time.sleep(60) #sleep for 15 minutes and then check again the status
         #I am here only if not_monitoring is True, that is only if mover status was delivered or the delivery is ongoing for more than 48h
         if delivery_status == 'DELIVERED' or delivery_status == 'FAILED':
-            import pdb
-            pdb.set_trace()
             #fetch all samples that were under delivery
             in_progress_samples = self.get_samples_from_charon(delivery_status="IN_PROGRESS")
             # now update them
