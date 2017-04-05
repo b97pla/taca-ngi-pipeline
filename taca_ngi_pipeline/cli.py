@@ -137,13 +137,6 @@ def sample(ctx, projectid, sampleid):
                 sid,
                 sftp_client=projectObj.sftp_client,
                 **ctx.parent.params)
-
-        # # guess this one should be removed, as we only deliver the project
-        # elif ctx.parent.params['cluster'] == 'grus':
-        #     d = _deliver_grus.GrusSampleDeliverer(
-        #         projectid,
-        #         sid,
-        #         **ctx.parent.params)
         _exec_fn(d, d.deliver_sample)
     if ctx.parent.params['cluster'] == 'bianca':
         projectObj.close_sftp_connnection()

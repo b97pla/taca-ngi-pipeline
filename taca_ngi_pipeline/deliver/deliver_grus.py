@@ -204,6 +204,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.exception(e)
             status = False
             return status
+        ######## TEST CODE #######
+        ######## NEEDS TO BE REMOVED FOR FIRST REAL TEST #######
         pi_email = "francesco.vezzi@scilifelab.se"
 
         pi_id = ''
@@ -230,7 +232,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
         if delivery_token:
-            # todo: save delivery_token in Charon
             self.save_delivery_token_in_charon(delivery_token)
         else:
             logger.error('Delivery project has not been created')
@@ -240,15 +241,12 @@ class GrusProjectDeliverer(ProjectDeliverer):
     def save_delivery_token_in_charon(self, delivery_token):
         '''Updates delivery_token in Charon
         '''
-        ## TODO: need to update ngi_pipeline.database.classes.project_update
-        ## and add field in Charon
         charon_session = CharonSession()
         charon_session.project_update(self.projectid, delivery_token=delivery_token)
 
     def delete_delivery_token_in_charon(self):
         '''Removes delivery_token from Charon upon successful delivery
         '''
-        #TODO: take care here also of the delivery_date
         charon_session = CharonSession()
         charon_session.project_update(self.projectid, delivery_token='NO-TOKEN')
     
@@ -329,7 +327,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
             raise AssertionError("API returned status code {}. Response: {}. URL: {}".format(response.status_code, response.content, create_project_url))
         result = json.loads(response.content)
         return result
-        # response will look like: {"links_incoming": [], "webpage": "", "abstract": "", "affiliation": "Stockholms universitet", "directory_name": "", "id": 231, "classification3": "", "classification2": "", "classification1": "", "title": "DELIVERY_P6968_2017-02-22", "pi": {"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}, "type": "NGI Delivery", "start_date": "2017-02-22 00:00:00", "ngi_ready": false, "end_date": "2017-08-22 00:00:00", "resourceprojects": [{"allocated": 1000, "resource": {"centre": {"name": "UPPMAX", "id": 4}, "capacity_unit": "GiB", "id": 42, "name": "Grus"}, "id": 255, "allocations": [{"allocated": 1000, "start_date": "2017-02-22", "end_date": "2017-08-22", "id": 278}]}], "links_outgoing": [], "members": [{"first_name": "Francesco", "last_name": "Vezzi", "id": 121, "email": "francesco.vezzi@scilifelab.se"}], "continuation_name": "", "name": "delivery00114", "managed_in_supr": true, "modified": "2017-02-22 13:56:12", "api_opaque_data": "", "ngi_delivery_status": "", "ngi_project_name": "P6968"}
 
 
     def _get_pi_id(self, pi_email):
