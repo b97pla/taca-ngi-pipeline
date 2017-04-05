@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 @click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca', 'grus']),
               help="Specify to which cluster one wants to deliver")
 
+
+
 def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster, ignore_analysis_status):
     """ Deliver methods entry point
     """
@@ -56,7 +58,17 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 @deliver.command()
 @click.pass_context
 @click.argument('projectid', type=click.STRING, nargs=-1)
-def project(ctx, projectid):
+@click.option('--snic-api-credentials',
+			  default=None,
+			  envvar='SNIC_API_STOCKHOLM',
+			  type=click.File('r'),
+			  help='Path to SNIC-API credentials to create delivery projects')
+@click.option('--statusdb-config',
+			  default=None,
+			  envvar='STATUS_DB_CONFIG',
+			  type=click.File('r'),
+			  help='Path to statusdb-configuration')
+def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None):
     """ Deliver the specified projects to the specified destination
     """
     if ctx.parent.params['cluster'] == 'bianca':
@@ -77,6 +89,14 @@ def project(ctx, projectid):
                 pid,
                 **ctx.parent.params)
         elif ctx.parent.params['cluster'] == 'grus':
+            if statusdb_config == None:
+                logger.error("--statusdb-config or env variable $STATUS_DB_CONFIG need to be set to perform GRUS delivery")
+                return 1
+            taca.utils.config.load_yaml_config(statusdb_config)
+            if snic_api_credentials == None:
+                logger.error("--snic-api-credentials or env variable $SNIC_API_STOCKHOLM need to be set to perform GRUS delivery")
+                return 1
+            taca.utils.config.load_yaml_config(snic_api_credentials)
             d = _deliver_grus.GrusProjectDeliverer(
                 pid,
                 **ctx.parent.params)

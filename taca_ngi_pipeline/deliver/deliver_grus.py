@@ -148,7 +148,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         """
 
         # moved this part from constructor, as we can create an object without running the delivery (e.g. to check_delivery_status)
-
         #check if the project directory already exists, if so abort
         hard_stagepath = self.expand_path(self.stagingpathhard)
         if os.path.exists(hard_stagepath):
