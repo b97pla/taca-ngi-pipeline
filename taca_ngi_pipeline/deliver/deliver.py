@@ -542,21 +542,24 @@ class SampleDeliverer(Deliverer):
                         and not self.force:
                     logger.info("{} has already been delivered".format(str(self)))
                     return True
-                elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
+                if self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
                         and not self.force:
                     logger.info("delivery of {} is already in progress".format(
                         str(self)))
                     return False
-                elif self.get_sample_status(sampleentry) == 'ABORTED':
+                if self.get_sample_status(sampleentry) == 'ABORTED':
                     logger.info("{} has been marked as ABORTED and will not be delivered".format(str(self)))
                     #set it to delivered as ABORTED samples should not fail the status of a project
-                    self.update_delivery_status(status="DELIVERED")
+                    if  self.get_delivery_status(sampleentry):
+                        #if status is set, then overwrite it to NOT_DELIVERED
+                        self.update_delivery_status(status="NOT DELIVERED")
+                    #otherwhise leave it empty. Return True as an aborted sample should not fail a delivery
                     return True
-                elif self.get_sample_status(sampleentry) == 'FRESH' \
+                if self.get_sample_status(sampleentry) == 'FRESH' \
                         and not self.force:
                     logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
                     return False
-                elif self.get_delivery_status(sampleentry) == 'FAILED':
+                if self.get_delivery_status(sampleentry) == 'FAILED':
                     logger.info("retrying delivery of previously failed sample {}".format(str(self)))
             except db.DatabaseError as e:
                 logger.error(
