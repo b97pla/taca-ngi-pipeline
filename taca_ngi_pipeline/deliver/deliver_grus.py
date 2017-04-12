@@ -211,9 +211,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
                         self.pi_email))
         pi_id = ''
         try:
-            import pdb
-            pdb.set_trace()
-            pi_id = self._get_pi_id(self.pi_email)
+            #TODo: remove this
+            pi_id = 1834 #self._get_pi_id()
             logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
             logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
