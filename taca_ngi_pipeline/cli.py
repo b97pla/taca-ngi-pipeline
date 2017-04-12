@@ -68,7 +68,11 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 			  envvar='STATUS_DB_CONFIG',
 			  type=click.File('r'),
 			  help='Path to statusdb-configuration')
-def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None):
+@click.option('--pi-email',
+			  default=None,
+			  type=click.STRING,
+			  help='pi-email, to be specified if PI-email stored in statusdb does not correspond SUPR PI-email')
+def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_email=None):
     """ Deliver the specified projects to the specified destination
     """
     if ctx.parent.params['cluster'] == 'bianca':
@@ -98,7 +102,8 @@ def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None):
                 return 1
             taca.utils.config.load_yaml_config(snic_api_credentials)
             d = _deliver_grus.GrusProjectDeliverer(
-                pid,
+                projectid=pid,
+                pi_email=pi_email,
                 **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
 

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class GrusProjectDeliverer(ProjectDeliverer):
     """ This object takes care of delivering project samples to castor's wharf.
     """
-    def __init__(self, projectid=None, sampleid=None, **kwargs):
+    def __init__(self, projectid=None, sampleid=None, pi_email=None, **kwargs):
         super(GrusProjectDeliverer, self).__init__(
             projectid,
             sampleid,
@@ -44,6 +44,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         self.config_statusdb = CONFIG.get('statusdb',None)
         if self.config_statusdb is None:
             raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
+        self.pi_email = pi_email
 
 
     def get_delivery_status(self, dbentry=None):
@@ -194,24 +195,25 @@ class GrusProjectDeliverer(ProjectDeliverer):
             # do we terminate or do we try to deliver partly?
             logger.warning('Not all the samples have been hard staged. Terminating')
             raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver), len(hard_staged_samples)))
-        
-        try:
-            pi_email = self._get_pi_email()
-            logger.info("email for PI for project {} found".format(self.projectid))
-        except Exception, e:
-            logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
-            # print the traceback, not only error message -> isn't it something more useful?
-            logger.exception(e)
-            status = False
-            return status
-        ######## TEST CODE #######
-        ######## NEEDS TO BE REMOVED FOR FIRST REAL TEST #######
-        pi_email = "francesco.vezzi@scilifelab.se"
-
+        #retrive pi-email
+        if self.pi_email is None:
+            try:
+                self.pi_email = self._get_pi_email()
+                logger.info("email for PI for project {} found: {}".format(self.projectid, self.pi_email))
+            except Exception, e:
+                logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
+                # print the traceback, not only error message -> isn't it something more useful?
+                logger.exception(e)
+                status = False
+                return status
+        else:
+            logger.warning("email for PI for project {} specified by user: {}".format(self.projectid,
+                        self.pi_email))
         pi_id = ''
         try:
-            #comment on irma
-            pi_id = self._get_pi_id(pi_email)
+            import pdb
+            pdb.set_trace()
+            pi_id = self._get_pi_id(self.pi_email)
             logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
             logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
@@ -274,6 +276,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
                 fname = os.path.join(root, file)
                 os.chown(fname, -1, 47537)
         ##this one is Johan code... check how to parse it
+        import pdb
+        pdb.set_trace()
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
         output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         "result looks like this"
@@ -329,23 +333,23 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return result
 
 
-    def _get_pi_id(self, pi_email):
+    def _get_pi_id(self):
         get_user_url = '{}/person/search/'.format(self.config_snic.get('snic_api_url'))
         user         = self.config_snic.get('snic_api_user')
         password     = self.config_snic.get('snic_api_password')
-        params   = {'email_i': pi_email}
+        params   = {'email_i': self.pi_email}
         response = requests.get(get_user_url, params=params, auth=(user, password))
 
         if response.status_code != 200:
-            raise AssertionError("Status code returned when trying to get PI id for email: {} was not 200. Response was: {}".format(pi_email, response.content))
+            raise AssertionError("Status code returned when trying to get PI id for email: {} was not 200. Response was: {}".format(self.pi_email, response.content))
         result = json.loads(response.content)
         matches = result.get("matches")
         if matches is None:
             raise AssertionError('The response returned unexpected data')
         if len(matches) < 1:
-            raise AssertionError("There were no hits in SUPR for email: {}".format(pi_email))
+            raise AssertionError("There were no hits in SUPR for email: {}".format(self.pi_email))
         if len(matches) > 1:
-            raise AssertionError("There we more than one hit in SUPR for email: {}".format(pi_email))
+            raise AssertionError("There we more than one hit in SUPR for email: {}".format(self.pi_email))
 
         pi_id = matches[0].get("id")
         return pi_id
