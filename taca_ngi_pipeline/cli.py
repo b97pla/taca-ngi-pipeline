@@ -179,10 +179,30 @@ def _exec_fn(obj, fn):
 @deliver.command()
 @click.pass_context
 @click.argument('projectid', type=click.STRING, nargs=-1)
-def check_status(ctx, projectid):
+@click.option('--snic-api-credentials',
+			  default=None,
+			  envvar='SNIC_API_STOCKHOLM',
+			  type=click.File('r'),
+			  help='Path to SNIC-API credentials to create delivery projects')
+@click.option('--statusdb-config',
+			  default=None,
+			  envvar='STATUS_DB_CONFIG',
+			  type=click.File('r'),
+			  help='Path to statusdb-configuration')
+
+def check_status(ctx, projectid, snic_api_credentials=None, statusdb_config=None):
     """In grus delivery mode checks the status of an onggoing delivery
     """
     for pid in projectid:
+        if statusdb_config == None:
+            logger.error("--statusdb-config or env variable $STATUS_DB_CONFIG need to be set to perform GRUS delivery")
+            return 1
+        taca.utils.config.load_yaml_config(statusdb_config)
+        if snic_api_credentials == None:
+            logger.error("--snic-api-credentials or env variable $SNIC_API_STOCKHOLM need to be set to perform GRUS delivery")
+            return 1
+        taca.utils.config.load_yaml_config(snic_api_credentials)
+
         d = _deliver_grus.GrusProjectDeliverer(
                 pid,
                 **ctx.parent.params)

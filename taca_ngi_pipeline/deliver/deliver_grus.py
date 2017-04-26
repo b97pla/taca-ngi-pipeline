@@ -34,7 +34,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
             sampleid,
             **kwargs
         )
-
         self.stagingpathhard = getattr(self, 'stagingpathhard', None)
         if self.stagingpathhard is None:
             raise AttributeError("stagingpathhard is required when delivering to GRUS")
@@ -56,8 +55,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
         :returns: the delivery status of this sample as a string
         """
         dbentry = dbentry or self.db_entry()
-        if dbentry.get('delivery_token'):
-            if dbentry.get('delivery_token') == 'NO-TOKEN':
+        if dbentry.get('best_practice_analysis'):
+            if dbentry.get('best_practice_analysis') == 'NO-TOKEN':
                 return 'NOT_DELIVERED'
             return 'IN_PROGRESS'
         else:
@@ -72,7 +71,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.info("Project {} has no delivery token. Project is not being delivered at the moment".format(self.projectid))
             return
         # if it's 'IN_PROGRESS', checking moverinfo
-        delivery_token = self.db_entry().get('delivery_token')
+        delivery_token = self.db_entry().get('best_practice_analysis')
         logger.info("Project {} under delivery. Delivery token is {}. Starting monitoring:".format(self.projectid, delivery_token))
         delivery_status = 'IN_PROGRESS'
         not_monitoring = False
@@ -122,7 +121,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
                     logger.info("Project {} under delivery. Status for delivery-token {} is : {}".format(self.projectid, delivery_token, mover_status))
                 else:
                     logger.warn("Project {} under delivery. Unexpected status-delivery returned by mover for delivery-token {}: {}".format(self.projectid, delivery_token, mover_status))
-            time.sleep(60) #sleep for 15 minutes and then check again the status
+            time.sleep(900) #sleep for 15 minutes and then check again the status
         #I am here only if not_monitoring is True, that is only if mover status was delivered or the delivery is ongoing for more than 48h
         if delivery_status == 'DELIVERED' or delivery_status == 'FAILED':
             #fetch all samples that were under delivery
@@ -171,7 +170,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         create_folder(hard_stagepath)
         # connect to charon, return list of sample objects that have been staged
         try:
-            samples_to_deliver = self.get_samples_from_charon(delivery_status="STAGED")
+            samples_to_deliver = self.get_samples_from_charon(delivery_status="STAGE")#"STAGED")
         except Exception, e:
             logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
             logger.exception(e)
@@ -212,7 +211,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         pi_id = ''
         try:
             #TODo: remove this
-            pi_id = 1834 #self._get_pi_id()
+            pi_id = self._get_pi_id()
             logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
         except Exception, e:
             logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
@@ -223,7 +222,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         # create a delivery project id
         supr_name_of_delivery = ''
         try:
-            #comment on irma
             delivery_project_info = self._create_delivery_project(pi_id)
             supr_name_of_delivery = delivery_project_info['name']
             logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, supr_name_of_delivery))
@@ -234,6 +232,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
         if delivery_token:
             self.save_delivery_token_in_charon(delivery_token)
+            logger.info("Delivery token for project {}, delivery project {} is {}".format(self.projectid,
+                                                                                    supr_name_of_delivery,
+                                                                                    delivery_token))
         else:
             logger.error('Delivery project has not been created')
             status = False
@@ -243,21 +244,25 @@ class GrusProjectDeliverer(ProjectDeliverer):
         '''Updates delivery_token in Charon
         '''
         charon_session = CharonSession()
-        charon_session.project_update(self.projectid, delivery_token=delivery_token)
+        charon_session.project_update(self.projectid, best_practice_analysis=delivery_token)
+        #charon_session.project_update(self.projectid, delivery_token=delivery_token)
 
     def delete_delivery_token_in_charon(self):
         '''Removes delivery_token from Charon upon successful delivery
         '''
         charon_session = CharonSession()
-        charon_session.project_update(self.projectid, delivery_token='NO-TOKEN')
+        charon_session.project_update(self.projectid, best_practice_analysis=delivery_token)
+        #charon_session.project_update(self.projectid, delivery_token='NO-TOKEN')
     
     def get_delivery_token_in_charon(self):
         '''fetches delivery_token from Charon
         '''
         charon_session = CharonSession()
         project_charon = charon_session.project_get(self.projectid)
-        if project_charon.get('delivery_token'):
-            return project_charon.get('delivery_token')
+        #if project_charon.get('delivery_token'):
+        if project_charon.get('best_practice_analysis'):
+            #return project_charon.get('delivery_token')
+            return project_charon.get('best_practice_analysis')
         else:
             return None
 
@@ -274,9 +279,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
             for file in files:
                 fname = os.path.join(root, file)
                 os.chown(fname, -1, 47537)
-        ##this one is Johan code... check how to parse it
-        import pdb
-        pdb.set_trace()
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
         output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         "result looks like this"
@@ -285,7 +287,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return delivery_token
 
 
-    def get_samples_from_charon(self, delivery_status='STAGED'):
+    def get_samples_from_charon(self, delivery_status='STAGE'):#'STAGED'):
         """Takes as input a delivery status and return all samples with that delivery status
         """
         charon_session = CharonSession()
@@ -413,7 +415,7 @@ class GrusSampleDeliverer(SampleDeliverer):
             hard_stagepath = self.expand_path(self.stagingpathhard)
             soft_stagepath = self.expand_path(self.stagingpath)
             try:
-                if self.get_delivery_status(sampleentry) != 'STAGED':
+                if self.get_delivery_status(sampleentry) != 'STAGE':#'STAGED':
                     logger.info("{} has not been staged and will not be delivered".format(str(self)))
                     return False
             except db.DatabaseError as e:
@@ -425,11 +427,11 @@ class GrusSampleDeliverer(SampleDeliverer):
             self.do_delivery()
         #in case of faiulure put again the status to STAGED
         except DelivererInterruptedError, e:
-            self.update_delivery_status(status="STAGED")
+            self.update_delivery_status(status="STAGE")#"STAGED")
             logger.exception(e)
             raise(e)
         except Exception, e:
-            self.update_delivery_status(status="STAGED")
+            self.update_delivery_status(status="STAGE")#"STAGED")
             logger.exception(e)
             raise(e)
 
