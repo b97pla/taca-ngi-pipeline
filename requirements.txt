@@ -5,3 +5,4 @@ taca>=0.1.9
 ngi_pipeline
 paramiko
 python-dateutil
+pyexcel
