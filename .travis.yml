@@ -12,6 +12,7 @@ before_install:
     - "git clone https://github.com/NationalGenomicsInfrastructure/ngi_pipeline.git ; cd ngi_pipeline;  python setup.py install; cd .. "
     - pip install setuptools --upgrade
     - pip install pyexcel
+    - pip install ipython==5.3.0
 install:
     - python setup.py install
 
