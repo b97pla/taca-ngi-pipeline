@@ -55,8 +55,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
         :returns: the delivery status of this sample as a string
         """
         dbentry = dbentry or self.db_entry()
-        if dbentry.get('best_practice_analysis'):
-            if dbentry.get('best_practice_analysis') == 'NO-TOKEN':
+        if dbentry.get('delivery_token'):
+            if dbentry.get('delivery_token') == 'NO-TOKEN':
                 return 'NOT_DELIVERED'
             return 'IN_PROGRESS'
         else:
@@ -71,7 +71,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.info("Project {} has no delivery token. Project is not being delivered at the moment".format(self.projectid))
             return
         # if it's 'IN_PROGRESS', checking moverinfo
-        delivery_token = self.db_entry().get('best_practice_analysis')
+        delivery_token = self.db_entry().get('delivery_token')
         logger.info("Project {} under delivery. Delivery token is {}. Starting monitoring:".format(self.projectid, delivery_token))
         delivery_status = 'IN_PROGRESS'
         not_monitoring = False
@@ -170,7 +170,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         create_folder(hard_stagepath)
         # connect to charon, return list of sample objects that have been staged
         try:
-            samples_to_deliver = self.get_samples_from_charon(delivery_status="STAGE")#"STAGED")
+            samples_to_deliver = self.get_samples_from_charon(delivery_status="STAGED")
         except Exception, e:
             logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
             logger.exception(e)
@@ -191,7 +191,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             else:
                 hard_staged_samples.append(sample_id)
         if len(samples_to_deliver) != len(hard_staged_samples):
-            # do we terminate or do we try to deliver partly?
+            # Something unexpected happend, terminate
             logger.warning('Not all the samples have been hard staged. Terminating')
             raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver), len(hard_staged_samples)))
         #retrive pi-email
@@ -218,7 +218,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.exception(e)
             status = False
             return status
-
         # create a delivery project id
         supr_name_of_delivery = ''
         try:
@@ -230,11 +229,18 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.exception(e)
 
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
+        #at this point I have delivery_token and supr_name_of_delivery so I need to update the project fields and the samples fields
+        import pdb
+        pdb.set_trace()
         if delivery_token:
             self.save_delivery_token_in_charon(delivery_token)
             logger.info("Delivery token for project {}, delivery project {} is {}".format(self.projectid,
                                                                                     supr_name_of_delivery,
                                                                                     delivery_token))
+            for sample_id in samples_to_deliver:
+            try:
+                sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
+                sample_deliverer.update_delivery_projects(supr_name_of_delivery) #TOD:implement this
         else:
             logger.error('Delivery project has not been created')
             status = False
@@ -244,25 +250,21 @@ class GrusProjectDeliverer(ProjectDeliverer):
         '''Updates delivery_token in Charon
         '''
         charon_session = CharonSession()
-        charon_session.project_update(self.projectid, best_practice_analysis=delivery_token)
-        #charon_session.project_update(self.projectid, delivery_token=delivery_token)
+        charon_session.project_update(self.projectid, delivery_token=delivery_token)
 
     def delete_delivery_token_in_charon(self):
         '''Removes delivery_token from Charon upon successful delivery
         '''
         charon_session = CharonSession()
-        charon_session.project_update(self.projectid, best_practice_analysis=delivery_token)
-        #charon_session.project_update(self.projectid, delivery_token='NO-TOKEN')
+        charon_session.project_update(self.projectid, delivery_token='NO-TOKEN')
     
     def get_delivery_token_in_charon(self):
         '''fetches delivery_token from Charon
         '''
         charon_session = CharonSession()
         project_charon = charon_session.project_get(self.projectid)
-        #if project_charon.get('delivery_token'):
-        if project_charon.get('best_practice_analysis'):
-            #return project_charon.get('delivery_token')
-            return project_charon.get('best_practice_analysis')
+        if project_charon.get('delivery_token'):
+            return project_charon.get('delivery_token')
         else:
             return None
 
@@ -287,7 +289,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return delivery_token
 
 
-    def get_samples_from_charon(self, delivery_status='STAGE'):#'STAGED'):
+    def get_samples_from_charon(self, delivery_status='STAGED'):
         """Takes as input a delivery status and return all samples with that delivery status
         """
         charon_session = CharonSession()
@@ -406,7 +408,7 @@ class GrusSampleDeliverer(SampleDeliverer):
         """
         # propagate raised errors upwards, they should trigger notification to operator
         # try:
-        logger.info("Delivering {} to GRUS with MOVER!!!!!".format(str(self)))
+        logger.info("Delivering {} to GRUS with MOVER".format(str(self)))
         hard_stagepath = self.expand_path(self.stagingpathhard)
         soft_stagepath = self.expand_path(self.stagingpath)
 
@@ -415,7 +417,7 @@ class GrusSampleDeliverer(SampleDeliverer):
             hard_stagepath = self.expand_path(self.stagingpathhard)
             soft_stagepath = self.expand_path(self.stagingpath)
             try:
-                if self.get_delivery_status(sampleentry) != 'STAGE':#'STAGED':
+                if self.get_delivery_status(sampleentry) != 'STAGED':
                     logger.info("{} has not been staged and will not be delivered".format(str(self)))
                     return False
             except db.DatabaseError as e:
@@ -427,11 +429,11 @@ class GrusSampleDeliverer(SampleDeliverer):
             self.do_delivery()
         #in case of faiulure put again the status to STAGED
         except DelivererInterruptedError, e:
-            self.update_delivery_status(status="STAGE")#"STAGED")
+            self.update_delivery_status(status="STAGED")
             logger.exception(e)
             raise(e)
         except Exception, e:
-            self.update_delivery_status(status="STAGE")#"STAGED")
+            self.update_delivery_status(status="STAGED")
             logger.exception(e)
             raise(e)
 

@@ -441,7 +441,7 @@ class ProjectDeliverer(Deliverer):
                     logger.warning("failed to copy report to report outbox, with reason: {}".format(e.message))
                 updated_status = "DELIVERED"
                 if self.stage_only:
-                    updated_status = "STAGE" #"STAGED"
+                    updated_status = "STAGED"
                 self.update_delivery_status(status=updated_status)
                 self.acknowledge_delivery()
 
@@ -594,7 +594,7 @@ class SampleDeliverer(Deliverer):
                 # write a delivery acknowledgement to disk
                 self.acknowledge_delivery()
             else:
-                self.update_delivery_status(status="STAGE")#"STAGED")
+                self.update_delivery_status(status="STAGED")
             return True
         except DelivererInterruptedError:
             self.update_delivery_status(status="NOT DELIVERED")
@@ -639,3 +639,9 @@ class SampleDeliverer(Deliverer):
                 if an error occurred when communicating with the database
         """
         return db.update_sample(db.dbcon(), self.projectid, self.sampleid, delivery_status=status)
+
+
+
+
+
+
