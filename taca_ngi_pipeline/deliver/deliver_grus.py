@@ -193,7 +193,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
         if len(samples_to_deliver) != len(hard_staged_samples):
             # Something unexpected happend, terminate
             logger.warning('Not all the samples have been hard staged. Terminating')
-            raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver), len(hard_staged_samples)))
+            raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver),
+                                                                                                        len(hard_staged_samples)))
         #retrive pi-email
         if self.pi_email is None:
             try:
@@ -230,24 +231,29 @@ class GrusProjectDeliverer(ProjectDeliverer):
 
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
         #at this point I have delivery_token and supr_name_of_delivery so I need to update the project fields and the samples fields
-        import pdb
-        pdb.set_trace()
         if delivery_token:
+            #memorise the delivery token used to check if project is under delivery
             self.save_delivery_token_in_charon(delivery_token)
+            #memorise the delivery project so I know each NGi project to how many delivery projects it has been sent
+            self.add_supr_name_delivery_in_charon(supr_name_of_delivery)
             logger.info("Delivery token for project {}, delivery project {} is {}".format(self.projectid,
                                                                                     supr_name_of_delivery,
                                                                                     delivery_token))
             for sample_id in samples_to_deliver:
-            try:
-                sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
-                sample_deliverer.update_delivery_projects(supr_name_of_delivery) #TOD:implement this
+                try:
+                    sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
+                    sample_deliverer.save_delivery_token_in_charon(delivery_token) #TOD:implement this
+                    sample_deliverer.add_supr_name_delivery_in_charon(supr_name_of_delivery) #TOD:implement this
+                except Exception, e:
+                    logger.error('Failed in saving sample infomration for sample {}. Error says: {}'.format(sample_id, e))
+                    logger.exception(e)
         else:
-            logger.error('Delivery project has not been created')
+            logger.error('Delivery project for project {} has not been created'.format(self.projectid))
             status = False
         return status
 
     def save_delivery_token_in_charon(self, delivery_token):
-        '''Updates delivery_token in Charon
+        '''Updates delivery_token in Charon at project level
         '''
         charon_session = CharonSession()
         charon_session.project_update(self.projectid, delivery_token=delivery_token)
@@ -267,6 +273,16 @@ class GrusProjectDeliverer(ProjectDeliverer):
             return project_charon.get('delivery_token')
         else:
             return None
+
+    def add_supr_name_delivery_in_charon(self, supr_name_of_delivery):
+        '''Updates delivery_projects in Charon at project level
+        '''
+        charon_session = CharonSession()
+        try:
+            charon_session.project_update(self.projectid, delivery_projects=supr_name_of_delivery)
+        except Exception, e:
+            logger.error('Failed to update delivery_projects in charon while delivering {}. Error says: {}'.format(self.projectid, e))
+            logger.exception(e)
 
     def do_delivery(self, supr_name_of_delivery):
         # this one returns error : "265 is non-existing at /usr/local/bin/to_outbox line 214". (265 is delivery_project_id, created via api)
@@ -436,6 +452,26 @@ class GrusSampleDeliverer(SampleDeliverer):
             self.update_delivery_status(status="STAGED")
             logger.exception(e)
             raise(e)
+
+
+    def save_delivery_token_in_charon(self, delivery_token):
+        '''Updates delivery_token in Charon at sample level
+        '''
+        charon_session = CharonSession()
+        charon_session.sample_update(self.projectid, self.sampleid, delivery_token=delivery_token)
+
+
+    def add_supr_name_delivery_in_charon(self, supr_name_of_delivery):
+        '''Updates delivery_projects in Charon at project level
+        '''
+        charon_session = CharonSession()
+        try:
+            charon_session.sample_update(self.projectid, self.sampleid, delivery_projects=supr_name_of_delivery)
+        except Exception, e:
+            logger.error('Failed to update delivery_projects in charon while delivering {}. Error says: {}'.format(self.sampleid, e))
+            logger.exception(e)
+
+
 
 
     def do_delivery(self):
