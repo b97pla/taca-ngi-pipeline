@@ -75,7 +75,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         logger.info("Project {} under delivery. Delivery token is {}. Starting monitoring:".format(self.projectid, delivery_token))
         delivery_status = 'IN_PROGRESS'
         not_monitoring = False
-        max_delivery_time = relativedelta(days=2)
+        max_delivery_time = relativedelta(days=7)
         monitoring_start = datetime.datetime.now()
         while ( not not_monitoring ):
             try:
@@ -279,7 +279,15 @@ class GrusProjectDeliverer(ProjectDeliverer):
         '''
         charon_session = CharonSession()
         try:
-            charon_session.project_update(self.projectid, delivery_projects=supr_name_of_delivery)
+            #fetch the project
+            project_charon = charon_session.project_get(self.projectid)
+            delivery_projects = project_charon['delivery_projects']
+            if supr_name_of_delivery not in delivery_projects:
+                delivery_projects.append(supr_name_of_delivery)
+                charon_session.project_update(self.projectid, delivery_projects=delivery_projects)
+                logger.info('Charon delivery_projects for project {} updated with value {}'.format(self.projectid, supr_name_of_delivery))
+            else:
+                logger.warn('Charon delivery_projects for project {} not updated with value {} because the value was already present'.format(self.projectid, supr_name_of_delivery))
         except Exception, e:
             logger.error('Failed to update delivery_projects in charon while delivering {}. Error says: {}'.format(self.projectid, e))
             logger.exception(e)
@@ -466,7 +474,15 @@ class GrusSampleDeliverer(SampleDeliverer):
         '''
         charon_session = CharonSession()
         try:
-            charon_session.sample_update(self.projectid, self.sampleid, delivery_projects=supr_name_of_delivery)
+            #fetch the project
+            sample_charon = charon_session.sample_get(self.projectid, self.sampleid)
+            delivery_projects = sample_charon['delivery_projects']
+            if supr_name_of_delivery not in sample_charon:
+                delivery_projects.append(supr_name_of_delivery)
+                charon_session.sample_update(self.projectid, self.sampleid, delivery_projects=delivery_projects)
+                logger.info('Charon delivery_projects for sample {} updated with value {}'.format(self.sampleid, supr_name_of_delivery))
+            else:
+                logger.warn('Charon delivery_projects for sample {} not updated with value {} because the value was already present'.format(self.sampleid, supr_name_of_delivery))
         except Exception, e:
             logger.error('Failed to update delivery_projects in charon while delivering {}. Error says: {}'.format(self.sampleid, e))
             logger.exception(e)
@@ -485,3 +501,5 @@ class GrusSampleDeliverer(SampleDeliverer):
         do_copy(source, destination)
         logger.info("Sample {} has been hard staged to {}".format(self.sampleid, destination))
         return
+
+
