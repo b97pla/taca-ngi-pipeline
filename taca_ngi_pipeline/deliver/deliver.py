@@ -540,7 +540,7 @@ class SampleDeliverer(Deliverer):
                         return False
                 if self.get_delivery_status(sampleentry) == 'DELIVERED' \
                         and not self.force:
-                    logger.info("{} has already been delivered".format(str(self)))
+                    logger.info("{} has already been delivered. Sample will not be delivered again this time.".format(str(self)))
                     return True
                 if self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
                         and not self.force:

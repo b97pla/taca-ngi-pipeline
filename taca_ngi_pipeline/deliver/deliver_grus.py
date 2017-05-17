@@ -15,6 +15,7 @@ import couchdb
 import json
 import subprocess
 from dateutil import parser
+import sys
 
 from ngi_pipeline.database.classes import CharonSession, CharonError
 from taca.utils.filesystem import do_copy, create_folder
@@ -24,6 +25,20 @@ from deliver import ProjectDeliverer, SampleDeliverer, DelivererInterruptedError
 
 logger = logging.getLogger(__name__)
 
+
+
+yes = set(['yes','y', 'ye'])
+no = set(['no','n'])
+def proceed_or_not():
+    sys.stdout.write("Do you want to proceed (yes/no): ")
+    while True:
+        choice = raw_input().lower()
+        if choice in yes:
+            return True
+        elif choice in no:
+            return False
+        else:
+            sys.stdout.write("Please respond with 'yes' or 'no'")
 
 class GrusProjectDeliverer(ProjectDeliverer):
     """ This object takes care of delivering project samples to castor's wharf.
@@ -56,11 +71,14 @@ class GrusProjectDeliverer(ProjectDeliverer):
         """
         dbentry = dbentry or self.db_entry()
         if dbentry.get('delivery_token'):
-            if dbentry.get('delivery_token') == 'NO-TOKEN':
-                return 'NOT_DELIVERED'
-            return 'IN_PROGRESS'
-        else:
-            return 'NOT_DELIVERED'
+            if dbentry.get('delivery_token') != 'NO-TOKEN':
+                return 'IN_PROGRESS' #it means that at least some samples are under delivery
+        if  dbentry.get('delivery_status'):
+            if dbentry.get('delivery_status') == 'DELIVERED':
+                return 'DELIVERED' #it means that the project has been marked as delivered
+        if dbentry.get('delivery_projects'):
+            return 'PARTIAL' #it means that the project underwent a delivery, but not for all the samples
+        return 'NOT_DELIVERED' #last possible case is that the project is not delivered
 
     def check_mover_delivery_status(self):
         """ This functions checks is project is under delivery. If so it waits until projects is delivered or a certain threshold is met
@@ -137,7 +155,20 @@ class GrusProjectDeliverer(ProjectDeliverer):
             #now reset delivery
             self.delete_delivery_token_in_charon()
             #now check, if all samples in charon are DELIVERED or are ABORTED as status, then the all projecct is DELIVERED
-            
+            all_samples_delivered = True
+            for sample_id in self.get_samples_from_charon():
+                try:
+                    sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
+                    if sample_deliverer.get_sample_status() == 'ABORTED':
+                        continue
+                    if sample_deliverer.get_delivery_status() != 'DELIVERED':
+                        all_samples_delivered = False
+                except Exception, e:
+                    logger.error('Sample {}: Problems in setting sample status on charon. Error: {}'.format(sample_id, error))
+                    logger.exception(e)
+            if all_samples_delivered:
+                self.update_delivery_status(status='DELIVERED')
+
 
 
 
@@ -155,16 +186,22 @@ class GrusProjectDeliverer(ProjectDeliverer):
                     hard_stagepath, self.projectid))
             raise DelivererInterruptedError("Hard Staged Folder already present")
         #check that this project is not under delivery with mover already in this case stop delivery
-        delivery_token = self.get_delivery_token_in_charon()
-        if delivery_token is not None:
+        if self.get_delivery_status() == 'DELIVERED' \
+                and not self.force:
+            logger.info("{} has already been delivered. This project will not be delivered again this time.".format(str(self)))
+            return True
+        elif self.get_delivery_status() == 'IN_PROGRESS':
             logger.error("Project {} is already under delivery {}. No multiple mover deliveries are allowed".format(
                     self.projectid, delivery_token))
             raise DelivererInterruptedError("Proejct already under delivery with Mover")
-        logger.info("Delivering {} to GRUS".format(str(self)))
-        if self.get_delivery_status() == 'DELIVERED' \
-                and not self.force:
-            logger.info("{} has already been delivered".format(str(self)))
-            return True
+        elif self.get_delivery_status() == 'PARTIAL':
+            logger.warning("{} has already been partially delivered. Please confirm you want to proceed.".format(str(self)))
+            if proceed_or_not():
+                logger.info("{} has already been partially delivered. User confirmed to proceed.".format(str(self)))
+            else:
+                logger.error("{} has already been partially delivered. User decided to not proceed.".format(str(self)))
+                return False
+        logger.info("Delivering {} to GRUS with mover.".format(str(self)))
         status = True
         #otherwise lock the delivery by creating the folder
         create_folder(hard_stagepath)
@@ -272,7 +309,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         if project_charon.get('delivery_token'):
             return project_charon.get('delivery_token')
         else:
-            return None
+            return 'NO-TOKEN'
 
     def add_supr_name_delivery_in_charon(self, supr_name_of_delivery):
         '''Updates delivery_projects in Charon at project level

@@ -142,6 +142,9 @@ def sample(ctx, projectid, sampleid):
                 sid,
                 sftp_client=projectObj.sftp_client,
                 **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'grus':
+            logger.error("When delivering to grus only project can be specified, not sample")
+            return 1
         _exec_fn(d, d.deliver_sample)
     if ctx.parent.params['cluster'] == 'bianca':
         projectObj.close_sftp_connnection()
