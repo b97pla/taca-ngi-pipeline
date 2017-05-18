@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 yes = set(['yes','y', 'ye'])
 no = set(['no','n'])
-def proceed_or_not():
-    sys.stdout.write("Do you want to proceed (yes/no): ")
+def proceed_or_not(question):
+    sys.stdout.write("{}".format(question))
     while True:
         choice = raw_input().lower()
         if choice in yes:
@@ -43,7 +43,7 @@ def proceed_or_not():
 class GrusProjectDeliverer(ProjectDeliverer):
     """ This object takes care of delivering project samples to castor's wharf.
     """
-    def __init__(self, projectid=None, sampleid=None, pi_email=None, **kwargs):
+    def __init__(self, projectid=None, sampleid=None, pi_email=None, sensitive=True, **kwargs):
         super(GrusProjectDeliverer, self).__init__(
             projectid,
             sampleid,
@@ -58,7 +58,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
         self.config_statusdb = CONFIG.get('statusdb',None)
         if self.config_statusdb is None:
             raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
-        self.pi_email = pi_email
+        self.pi_email  = pi_email
+        self.sensitive = sensitive
 
 
     def get_delivery_status(self, dbentry=None):
@@ -196,12 +197,21 @@ class GrusProjectDeliverer(ProjectDeliverer):
             raise DelivererInterruptedError("Proejct already under delivery with Mover")
         elif self.get_delivery_status() == 'PARTIAL':
             logger.warning("{} has already been partially delivered. Please confirm you want to proceed.".format(str(self)))
-            if proceed_or_not():
+            if proceed_or_not("Do you want to proceed (yes/no): "):
                 logger.info("{} has already been partially delivered. User confirmed to proceed.".format(str(self)))
             else:
                 logger.error("{} has already been partially delivered. User decided to not proceed.".format(str(self)))
                 return False
-        logger.info("Delivering {} to GRUS with mover.".format(str(self)))
+        #now check if the sensitive flag has been set in the correct way
+        question = "This project has been marked as SENSITIVE (option --sensitive). Do you want to proceed with delivery? "
+        if not self.sensitive:
+            question = "This project has been marked as NON-SENSITIVE (option --no-sensitive). Do you want to proceed with delivery? "
+        if proceed_or_not(question):
+            logger.info("Delivering {} to GRUS with mover. Project marked as SENSITIVE={}".format(str(self), self.sensitive))
+        else:
+            logger.error("{} delivery has been aborted. Sensitive level was WRONG.".format(str(self)))
+            return False
+        #now start with the real work
         status = True
         #otherwise lock the delivery by creating the folder
         create_folder(hard_stagepath)
@@ -259,7 +269,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         # create a delivery project id
         supr_name_of_delivery = ''
         try:
-            delivery_project_info = self._create_delivery_project(pi_id)
+            delivery_project_info = self._create_delivery_project(pi_id, self.sensitive)
             supr_name_of_delivery = delivery_project_info['name']
             logger.info("Delivery project for project {} has been created. Delivery IDis {}".format(self.projectid, supr_name_of_delivery))
         except Exception, e:
@@ -367,8 +377,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return samples_of_interest
 
 
-    def _create_delivery_project(self, pi_id):
-        # "https://disposer.c3se.chalmers.se/supr-test/api/ngi_delivery/project/create/"
+    def _create_delivery_project(self, pi_id, sensitive):
         create_project_url = '{}/ngi_delivery/project/create/'.format(self.config_snic.get('snic_api_url'))
         user               = self.config_snic.get('snic_api_user')
         password           = self.config_snic.get('snic_api_password')
@@ -387,7 +396,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             # This field can be used to add any data you like
             'api_opaque_data': '',
             'ngi_ready': False,
-            'ngi_delivery_status': ''
+            'ngi_delivery_status': '',
+            'ngi_sensitive_data': sensitive
         }
 
         response = requests.post(create_project_url, data=json.dumps(data), auth=(user, password))

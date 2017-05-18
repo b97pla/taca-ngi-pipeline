@@ -72,7 +72,11 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 			  default=None,
 			  type=click.STRING,
 			  help='pi-email, to be specified if PI-email stored in statusdb does not correspond SUPR PI-email')
-def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_email=None):
+@click.option('--sensitive/--no-sensitive',
+			  default = True,
+              help='flag to specify if data contained in the project is sensitive or not')
+
+def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_email=None, sensitive=True):
     """ Deliver the specified projects to the specified destination
     """
     if ctx.parent.params['cluster'] == 'bianca':
@@ -104,6 +108,7 @@ def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_
             d = _deliver_grus.GrusProjectDeliverer(
                 projectid=pid,
                 pi_email=pi_email,
+                sensitive=sensitive,
                 **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
 
