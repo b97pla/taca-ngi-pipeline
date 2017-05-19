@@ -157,7 +157,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             self.delete_delivery_token_in_charon()
             #now check, if all samples in charon are DELIVERED or are ABORTED as status, then the all projecct is DELIVERED
             all_samples_delivered = True
-            for sample_id in self.get_samples_from_charon():
+            for sample_id in self.get_samples_from_charon(delivery_status=None):
                 try:
                     sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
                     if sample_deliverer.get_sample_status() == 'ABORTED':
@@ -168,7 +168,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
                     logger.error('Sample {}: Problems in setting sample status on charon. Error: {}'.format(sample_id, error))
                     logger.exception(e)
             if all_samples_delivered:
-                self.update_delivery_status(status='DELIVERED')
+                self.update_delivery_status(status=delivery_status)
 
 
 
@@ -371,8 +371,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
         samples_of_interest = []
         for sample in samples:
             sample_id = sample.get('sampleid')
-            cahron_delivery_status = sample.get('delivery_status')
-            if cahron_delivery_status == delivery_status:
+            charon_delivery_status = sample.get('delivery_status')
+            if charon_delivery_status == delivery_status or delivery_status is None:
                 samples_of_interest.append(sample_id)
         return samples_of_interest
 
