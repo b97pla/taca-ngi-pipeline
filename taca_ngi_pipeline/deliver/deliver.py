@@ -312,7 +312,7 @@ class ProjectDeliverer(Deliverer):
                 delivered, False otherwise
         """
         sampleentries = sampleentries or db.project_sample_entries(db.dbcon(), self.projectid).get('samples', [])
-        return all([self.get_delivery_status(sentry) == 'DELIVERED' for sentry in sampleentries])
+        return all([self.get_delivery_status(sentry) == 'DELIVERED' for sentry in sampleentries if self.get_sample_status(sentry) != "ABORTED" ])
 
     def create_report(self):
         """ Create a final aggregate report via a system call """
