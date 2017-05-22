@@ -8,11 +8,8 @@ before_install:
     - export CHARON_API_TOKEN="charonapitokengoeshere"
     - mkdir /home/travis/.ngipipeline
     - "echo foo: bar > /home/travis/.ngipipeline/ngi_config.yaml"
-    - "git clone https://github.com/SciLifeLab/TACA.git ; cd TACA; python setup.py install; cd .."
-    - "git clone https://github.com/NationalGenomicsInfrastructure/ngi_pipeline.git ; cd ngi_pipeline;  python setup.py install; cd .. "
     - pip install setuptools --upgrade
     - pip install pyexcel
-    - pip install ipython==5.3.0
 install:
     - python setup.py install
 
