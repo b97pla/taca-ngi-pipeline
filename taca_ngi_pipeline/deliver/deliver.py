@@ -87,6 +87,7 @@ class Deliverer(object):
         self.reportpath = getattr(self, 'reportpath', None)
         self.force = getattr(self, 'force', False)
         self.stage_only = getattr(self, 'stage_only', False)
+        self.ignore_analysis_status = getattr(self, 'ignore_analysis_status', False)
         #Fetches a project name, should always be availble; but is not a requirement
         try:
             self.projectname = db.project_entry(db.dbcon(), projectid)['name']
@@ -311,7 +312,7 @@ class ProjectDeliverer(Deliverer):
                 delivered, False otherwise
         """
         sampleentries = sampleentries or db.project_sample_entries(db.dbcon(), self.projectid).get('samples', [])
-        return all([self.get_delivery_status(sentry) == 'DELIVERED' for sentry in sampleentries])
+        return all([self.get_delivery_status(sentry) == 'DELIVERED' for sentry in sampleentries if self.get_sample_status(sentry) != "ABORTED" ])
 
     def create_report(self):
         """ Create a final aggregate report via a system call """
@@ -398,8 +399,12 @@ class ProjectDeliverer(Deliverer):
                 any sample was not properly delivered or ready to be delivered
         """
         try:
-            logger.info("Delivering {} to {}".format(
-                str(self), self.expand_path(self.deliverypath)))
+            if not self.stage_only:
+                logger.info("Delivering {} to {}".format(
+                    str(self), self.expand_path(self.deliverypath)))
+            else:
+                logger.info("Staging {}".format(str(self)))
+        
             if self.get_delivery_status() == 'DELIVERED' \
                     and not self.force:
                 logger.info("{} has already been delivered".format(str(self)))
@@ -434,8 +439,10 @@ class ProjectDeliverer(Deliverer):
                         self.copy_report()
                 except Exception as e:
                     logger.warning("failed to copy report to report outbox, with reason: {}".format(e.message))
-
-                self.update_delivery_status(status="DELIVERED")
+                updated_status = "DELIVERED"
+                if self.stage_only:
+                    updated_status = "STAGED"
+                self.update_delivery_status(status=updated_status)
                 self.acknowledge_delivery()
 
             return status
@@ -521,32 +528,38 @@ class SampleDeliverer(Deliverer):
         """
         # propagate raised errors upwards, they should trigger notification to operator
         try:
-            logger.info("Delivering {} to {}".format(
-                str(self), self.expand_path(self.deliverypath)))
+            if not self.stage_only:
+                logger.info("Delivering {} to {}".format(
+                    str(self), self.expand_path(self.deliverypath)))
+            else:
+                logger.info("Staging {}".format(str(self)))
             try:
-                if self.get_analysis_status(sampleentry) != 'ANALYZED' \
-                        and not self.force:
-                    logger.info("{} has not finished analysis and will not be delivered".format(str(self)))
-                    return False
+                if self.get_analysis_status(sampleentry) != 'ANALYZED':
+                    if not self.force and not self.ignore_analysis_status:
+                        logger.info("{} has not finished analysis and will not be delivered".format(str(self)))
+                        return False
                 if self.get_delivery_status(sampleentry) == 'DELIVERED' \
                         and not self.force:
-                    logger.info("{} has already been delivered".format(str(self)))
+                    logger.info("{} has already been delivered. Sample will not be delivered again this time.".format(str(self)))
                     return True
-                elif self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
+                if self.get_delivery_status(sampleentry) == 'IN_PROGRESS' \
                         and not self.force:
                     logger.info("delivery of {} is already in progress".format(
                         str(self)))
                     return False
-                elif self.get_sample_status(sampleentry) == 'ABORTED':
+                if self.get_sample_status(sampleentry) == 'ABORTED':
                     logger.info("{} has been marked as ABORTED and will not be delivered".format(str(self)))
                     #set it to delivered as ABORTED samples should not fail the status of a project
-                    self.update_delivery_status(status="DELIVERED")
+                    if  self.get_delivery_status(sampleentry):
+                        #if status is set, then overwrite it to NOT_DELIVERED
+                        self.update_delivery_status(status="NOT DELIVERED")
+                    #otherwhise leave it empty. Return True as an aborted sample should not fail a delivery
                     return True
-                elif self.get_sample_status(sampleentry) == 'FRESH' \
+                if self.get_sample_status(sampleentry) == 'FRESH' \
                         and not self.force:
                     logger.info("{} is marked as FRESH (new unporcessed data is available)and will not be delivered".format(str(self)))
                     return False
-                elif self.get_delivery_status(sampleentry) == 'FAILED':
+                if self.get_delivery_status(sampleentry) == 'FAILED':
                     logger.info("retrying delivery of previously failed sample {}".format(str(self)))
             except db.DatabaseError as e:
                 logger.error(
@@ -580,6 +593,8 @@ class SampleDeliverer(Deliverer):
                 self.update_delivery_status()
                 # write a delivery acknowledgement to disk
                 self.acknowledge_delivery()
+            else:
+                self.update_delivery_status(status="STAGED")
             return True
         except DelivererInterruptedError:
             self.update_delivery_status(status="NOT DELIVERED")
@@ -624,3 +639,9 @@ class SampleDeliverer(Deliverer):
                 if an error occurred when communicating with the database
         """
         return db.update_sample(db.dbcon(), self.projectid, self.sampleid, delivery_status=status)
+
+
+
+
+
+

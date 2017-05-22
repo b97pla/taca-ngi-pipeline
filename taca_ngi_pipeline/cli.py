@@ -2,10 +2,19 @@
 """
 import click
 import logging
+import os
+import subprocess
+
+from ngi_pipeline.database.classes import CharonSession
+from taca.utils.config import CONFIG
+
 import taca.utils.misc
 from deliver import deliver as _deliver
 from deliver import deliver_mosler as _deliver_mosler
 from deliver import deliver_castor as _deliver_castor
+from deliver import deliver_grus as _deliver_grus
+
+from deliver.deliver_grus import GrusProjectDeliverer
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +32,16 @@ logger = logging.getLogger(__name__)
               help="Email address to notify operator at. Multiple operators can be specified")
 @click.option('--stage_only', is_flag=True, default=False,
               help="Only stage the delivery but do not transfer any files")
+@click.option('--ignore-analysis-status', is_flag=True, default=False,
+              help="Do not check analysis status upon delivery. To be used only when delivering projects without BP (e.g., WHG)")
 @click.option('--force', is_flag=True, default=False,
               help="Force delivery, even if e.g. analysis has not finished or sample has already been delivered")
-@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca']),
+@click.option('--cluster', default="milou",  type=click.Choice(['milou', 'mosler', 'bianca', 'grus']),
               help="Specify to which cluster one wants to deliver")
 
-def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster):
+
+
+def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, force, cluster, ignore_analysis_status):
     """ Deliver methods entry point
     """
     if deliverypath is None:
@@ -41,12 +54,29 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
         del ctx.params['operator']
 
 # deliver subcommands
-
 # project delivery
 @deliver.command()
 @click.pass_context
 @click.argument('projectid', type=click.STRING, nargs=-1)
-def project(ctx, projectid):
+@click.option('--snic-api-credentials',
+			  default=None,
+			  envvar='SNIC_API_STOCKHOLM',
+			  type=click.File('r'),
+			  help='Path to SNIC-API credentials to create delivery projects')
+@click.option('--statusdb-config',
+			  default=None,
+			  envvar='STATUS_DB_CONFIG',
+			  type=click.File('r'),
+			  help='Path to statusdb-configuration')
+@click.option('--pi-email',
+			  default=None,
+			  type=click.STRING,
+			  help='pi-email, to be specified if PI-email stored in statusdb does not correspond SUPR PI-email')
+@click.option('--sensitive/--no-sensitive',
+			  default = True,
+              help='flag to specify if data contained in the project is sensitive or not')
+
+def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_email=None, sensitive=True):
     """ Deliver the specified projects to the specified destination
     """
     if ctx.parent.params['cluster'] == 'bianca':
@@ -65,6 +95,20 @@ def project(ctx, projectid):
         elif ctx.parent.params['cluster'] == 'bianca':
             d = _deliver_castor.CastorProjectDeliverer(
                 pid,
+                **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'grus':
+            if statusdb_config == None:
+                logger.error("--statusdb-config or env variable $STATUS_DB_CONFIG need to be set to perform GRUS delivery")
+                return 1
+            taca.utils.config.load_yaml_config(statusdb_config)
+            if snic_api_credentials == None:
+                logger.error("--snic-api-credentials or env variable $SNIC_API_STOCKHOLM need to be set to perform GRUS delivery")
+                return 1
+            taca.utils.config.load_yaml_config(snic_api_credentials)
+            d = _deliver_grus.GrusProjectDeliverer(
+                projectid=pid,
+                pi_email=pi_email,
+                sensitive=sensitive,
                 **ctx.parent.params)
         _exec_fn(d, d.deliver_project)
 
@@ -103,6 +147,9 @@ def sample(ctx, projectid, sampleid):
                 sid,
                 sftp_client=projectObj.sftp_client,
                 **ctx.parent.params)
+        elif ctx.parent.params['cluster'] == 'grus':
+            logger.error("When delivering to grus only project can be specified, not sample")
+            return 1
         _exec_fn(d, d.deliver_sample)
     if ctx.parent.params['cluster'] == 'bianca':
         projectObj.close_sftp_connnection()
@@ -119,6 +166,7 @@ def _exec_fn(obj, fn):
                 "{} processed with some errors, check log".format(
                     str(obj)))
     except Exception as e:
+        logger.exception(e)
         try:
             taca.utils.misc.send_mail(
                 subject="[ERROR] processing failed: {}".format(str(obj)),
@@ -132,3 +180,41 @@ def _exec_fn(obj, fn):
         else:
             logger.error("processing {} failed - reason: {}, operator {} has been notified".format(
                 str(obj), str(e), obj.config.get('operator')))
+
+
+
+
+@deliver.command()
+@click.pass_context
+@click.argument('projectid', type=click.STRING, nargs=-1)
+@click.option('--snic-api-credentials',
+			  default=None,
+			  envvar='SNIC_API_STOCKHOLM',
+			  type=click.File('r'),
+			  help='Path to SNIC-API credentials to create delivery projects')
+@click.option('--statusdb-config',
+			  default=None,
+			  envvar='STATUS_DB_CONFIG',
+			  type=click.File('r'),
+			  help='Path to statusdb-configuration')
+
+def check_status(ctx, projectid, snic_api_credentials=None, statusdb_config=None):
+    """In grus delivery mode checks the status of an onggoing delivery
+    """
+    for pid in projectid:
+        if statusdb_config == None:
+            logger.error("--statusdb-config or env variable $STATUS_DB_CONFIG need to be set to perform GRUS delivery")
+            return 1
+        taca.utils.config.load_yaml_config(statusdb_config)
+        if snic_api_credentials == None:
+            logger.error("--snic-api-credentials or env variable $SNIC_API_STOCKHOLM need to be set to perform GRUS delivery")
+            return 1
+        taca.utils.config.load_yaml_config(snic_api_credentials)
+
+        d = _deliver_grus.GrusProjectDeliverer(
+                pid,
+                **ctx.parent.params)
+        d.check_mover_delivery_status()
+
+
+
