@@ -16,6 +16,7 @@ import json
 import subprocess
 from dateutil import parser
 import sys
+import re
 
 from ngi_pipeline.database.classes import CharonSession, CharonError
 from taca.utils.filesystem import do_copy, create_folder
@@ -40,6 +41,18 @@ def proceed_or_not(question):
         else:
             sys.stdout.write("Please respond with 'yes' or 'no'")
 
+def check_mover_version():
+    cmd = ['moverinfo', '--version']
+    output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    m = re.search('.* version (\d\.\d\.\d)', output)
+    if not m:
+        logger.error("Probelm tring to idenitify mover version. Failed!")
+        return False
+    if m.group(1) != "1.0.0":
+        logger.error("mover version is {}, only allowed version is 1.0.0. Please run module load mover/1.0.0 and retry".format(m.group(1)))
+        return False
+    return True #if I am here this is mover/1.0.0 so I am finr
+
 class GrusProjectDeliverer(ProjectDeliverer):
     """ This object takes care of delivering project samples to castor's wharf.
     """
@@ -58,6 +71,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
         self.config_statusdb = CONFIG.get('statusdb',None)
         if self.config_statusdb is None:
             raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
+        self.orderportal = CONFIG.get('order_portal',None)
+        if self.orderportal is None:
+            raise AttributeError("orderportal configuration is needed  delivering to GRUS (url, username, password, port")
         self.pi_email  = pi_email
         self.sensitive = sensitive
 
@@ -84,6 +100,10 @@ class GrusProjectDeliverer(ProjectDeliverer):
     def check_mover_delivery_status(self):
         """ This functions checks is project is under delivery. If so it waits until projects is delivered or a certain threshold is met
         """
+        #first thing check that we are using mover 1.0.0
+        if not check_mover_version():
+             logger.error("Not delivering becouse wrong mover version detected")
+             return False
         charon_status = self.get_delivery_status()
         # we don't care if delivery is not in progress
         if charon_status != 'IN_PROGRESS':
@@ -178,7 +198,14 @@ class GrusProjectDeliverer(ProjectDeliverer):
             :returns: True if all samples were delivered successfully, False if
                 any sample was not properly delivered or ready to be delivered
         """
+        #first thing check that we are using mover 1.0.0
+        if not check_mover_version():
+             logger.error("Not delivering becouse wrong mover version detected")
+             return False
+        import pdb
+        pdb.set_trace()
 
+        
         # moved this part from constructor, as we can create an object without running the delivery (e.g. to check_delivery_status)
         #check if the project directory already exists, if so abort
         hard_stagepath = self.expand_path(self.stagingpathhard)
@@ -215,6 +242,31 @@ class GrusProjectDeliverer(ProjectDeliverer):
         status = True
         #otherwise lock the delivery by creating the folder
         create_folder(hard_stagepath)
+        #now find the PI mail which is needed to create the delivery project
+        if self.pi_email is None:
+            try:
+                self.pi_email = self._get_pi_email()
+                logger.info("email for PI for project {} found: {}".format(self.projectid, self.pi_email))
+            except Exception, e:
+                logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
+                # print the traceback, not only error message -> isn't it something more useful?
+                logger.exception(e)
+                status = False
+                return status
+        else:
+            logger.warning("email for PI for project {} specified by user: {}".format(self.projectid,
+                        self.pi_email))
+        #and now get the pi PID from snic
+        pi_id = ''
+        try:
+            pi_id = self._get_pi_id()
+            logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
+        except Exception, e:
+            logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
+            logger.exception(e)
+            status = False
+            return status
+        
         # connect to charon, return list of sample objects that have been staged
         try:
             samples_to_deliver = self.get_samples_from_charon(delivery_status="STAGED")
@@ -242,31 +294,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.warning('Not all the samples have been hard staged. Terminating')
             raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver),
                                                                                                         len(hard_staged_samples)))
-        #retrive pi-email
-        if self.pi_email is None:
-            try:
-                self.pi_email = self._get_pi_email()
-                logger.info("email for PI for project {} found: {}".format(self.projectid, self.pi_email))
-            except Exception, e:
-                logger.error("Cannot fetch pi_email from StatusDB. Error says: {}".format(str(e)))
-                # print the traceback, not only error message -> isn't it something more useful?
-                logger.exception(e)
-                status = False
-                return status
-        else:
-            logger.warning("email for PI for project {} specified by user: {}".format(self.projectid,
-                        self.pi_email))
-        pi_id = ''
-        try:
-            #TODo: remove this
-            pi_id = self._get_pi_id()
-            logger.info("PI-id for delivering of project {} is {}".format(self.projectid, pi_id))
-        except Exception, e:
-            logger.error("Cannot fetch pi_id from snic API. Error says: {}".format(str(e)))
-            logger.exception(e)
-            status = False
-            return status
         # create a delivery project id
+        import pdb
+        pdb.set_trace()
         supr_name_of_delivery = ''
         try:
             delivery_project_info = self._create_delivery_project(pi_id, self.sensitive)
@@ -275,7 +305,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         except Exception, e:
             logger.error('Cannot create delivery project. Error says: {}'.format())
             logger.exception(e)
-
         delivery_token = self.do_delivery(supr_name_of_delivery) # instead of to_outbox
         #at this point I have delivery_token and supr_name_of_delivery so I need to update the project fields and the samples fields
         if delivery_token:
@@ -435,17 +464,39 @@ class GrusProjectDeliverer(ProjectDeliverer):
         password = self.config_statusdb.get('password')
         port     = self.config_statusdb.get('port')
         status_db_url = 'http://{}:{}@{}:{}'.format(username, password, url, port)
-
+        import pdb
+        pdb.set_trace()
+        
         status_db = couchdb.Server(status_db_url)
-        orderportal_db = status_db['orderportal_ngi']
-        view = orderportal_db.view('taca/project_id_to_pi_email')
+        projects_db = status_db['projects']
+        view = projects_db.view('order_portal/ProjectID_to_PortalID')
         rows = view[self.projectid].rows
         if len(rows) < 1:
             raise AssertionError("Project {} not found in StatusDB: {}".format(self.projecid, url))
         if len(rows) > 1:
             raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
-
-        pi_email = rows[0].value
+        portal_id = rows[0].value
+        #now get the PI email from order portal API
+        get_project_url = '{}/v1/order/{}'.format(self.orderportal.get('orderportal_api_url'), portal_id)
+        headers = {'X-OrderPortal-API-key': '{}'.format(self.orderportal.get('orderportal_api_token'))}
+        response = requests.get(get_project_url, headers=headers)
+        response.status_code  #this returns 200 perfect
+        json.dumps(response.json(), indent=2)
+        if response.status_code != 200:
+            raise AssertionError("Status code returned when trying to get PI email from project in order portal: {} was not 200. Response was: {}".format(portal_id, response.content))
+        import pdb
+        pdb.set_trace()
+        result = json.loads(response.content)
+        
+        #orderportal_db = status_db['orderportal_ngi']
+        #view = orderportal_db.view('taca/project_id_to_pi_email')
+        #rows = view[self.projectid].rows
+        #if len(rows) < 1:
+        #    raise AssertionError("Project {} not found in StatusDB: {}".format(self.projecid, url))
+        #if len(rows) > 1:
+        #    raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
+        #
+        #pi_email = rows[0].value
         return pi_email
 
 

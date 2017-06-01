@@ -68,6 +68,11 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 			  envvar='STATUS_DB_CONFIG',
 			  type=click.File('r'),
 			  help='Path to statusdb-configuration')
+@click.option('--order-portal',
+			  default=None,
+			  envvar='ORDER_PORTAL',
+			  type=click.File('r'),
+			  help='Path to order portal credantials to retrive PI email')
 @click.option('--pi-email',
 			  default=None,
 			  type=click.STRING,
@@ -76,7 +81,7 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 			  default = True,
               help='flag to specify if data contained in the project is sensitive or not')
 
-def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_email=None, sensitive=True):
+def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, order_portal=None, pi_email=None, sensitive=True):
     """ Deliver the specified projects to the specified destination
     """
     if ctx.parent.params['cluster'] == 'bianca':
@@ -105,6 +110,10 @@ def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, pi_
                 logger.error("--snic-api-credentials or env variable $SNIC_API_STOCKHOLM need to be set to perform GRUS delivery")
                 return 1
             taca.utils.config.load_yaml_config(snic_api_credentials)
+            if order_portal == None:
+                logger.error("--order-portal or env variable $ORDER_PORTAL need to be set to perform GRUS delivery")
+                return 1
+            taca.utils.config.load_yaml_config(order_portal)
             d = _deliver_grus.GrusProjectDeliverer(
                 projectid=pid,
                 pi_email=pi_email,
