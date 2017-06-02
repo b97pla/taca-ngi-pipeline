@@ -56,7 +56,7 @@ def check_mover_version():
 class GrusProjectDeliverer(ProjectDeliverer):
     """ This object takes care of delivering project samples to castor's wharf.
     """
-    def __init__(self, projectid=None, sampleid=None, pi_email=None, sensitive=True, **kwargs):
+    def __init__(self, projectid=None, sampleid=None, pi_email=None, sensitive=True, hard_stage_only=False, **kwargs):
         super(GrusProjectDeliverer, self).__init__(
             projectid,
             sampleid,
@@ -74,6 +74,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         self.orderportal = CONFIG.get('order_portal',None) # do not need to raise expection here, I have already checked for this and monitoring does not need it
         self.pi_email  = pi_email
         self.sensitive = sensitive
+        self.hard_stage_only = hard_stage_only
 
 
     def get_delivery_status(self, dbentry=None):
@@ -310,8 +311,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             for sample_id in samples_to_deliver:
                 try:
                     sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
-                    sample_deliverer.save_delivery_token_in_charon(delivery_token) #TOD:implement this
-                    sample_deliverer.add_supr_name_delivery_in_charon(supr_name_of_delivery) #TOD:implement this
+                    sample_deliverer.save_delivery_token_in_charon(delivery_token)
+                    sample_deliverer.add_supr_name_delivery_in_charon(supr_name_of_delivery)
                 except Exception, e:
                     logger.error('Failed in saving sample infomration for sample {}. Error says: {}'.format(sample_id, e))
                     logger.exception(e)
@@ -374,6 +375,10 @@ class GrusProjectDeliverer(ProjectDeliverer):
                 fname = os.path.join(root, file)
                 os.chown(fname, -1, 47537)
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
+        if self.hard_stage_only:
+            logger.warning("to_mover command not executed, only hard-staging done. Do what you need to do and then run: {}".format(" ".join(cmd)))
+            return "manually-set-up"
+        
         try:
             output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
