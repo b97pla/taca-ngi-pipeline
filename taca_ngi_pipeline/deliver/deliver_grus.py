@@ -71,9 +71,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         self.config_statusdb = CONFIG.get('statusdb',None)
         if self.config_statusdb is None:
             raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
-        self.orderportal = CONFIG.get('order_portal',None)
-        if self.orderportal is None:
-            raise AttributeError("orderportal configuration is needed  delivering to GRUS (url, username, password, port")
+        self.orderportal = CONFIG.get('order_portal',None) # do not need to raise expection here, I have already checked for this and monitoring does not need it
         self.pi_email  = pi_email
         self.sensitive = sensitive
 
@@ -202,10 +200,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         if not check_mover_version():
              logger.error("Not delivering becouse wrong mover version detected")
              return False
-        import pdb
-        pdb.set_trace()
-
-        
         # moved this part from constructor, as we can create an object without running the delivery (e.g. to check_delivery_status)
         #check if the project directory already exists, if so abort
         hard_stagepath = self.expand_path(self.stagingpathhard)
@@ -295,8 +289,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
             raise AssertionError('len(samples_to_deliver) != len(hard_staged_samples): {} != {}'.format(len(samples_to_deliver),
                                                                                                         len(hard_staged_samples)))
         # create a delivery project id
-        import pdb
-        pdb.set_trace()
         supr_name_of_delivery = ''
         try:
             delivery_project_info = self._create_delivery_project(pi_id, self.sensitive)
@@ -382,10 +374,12 @@ class GrusProjectDeliverer(ProjectDeliverer):
                 fname = os.path.join(root, file)
                 os.chown(fname, -1, 47537)
         cmd = ['to_outbox', hard_stage, supr_name_of_delivery]
-        output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        "result looks like this"
-        "'id=P6968-ngi2016003-1490007371 Found receiver delivery00009 with end date: 2017-09-17\nP6968 queued for delivery to delivery00009, id = P6968-ngi2016003-1490007371\n'"
-        delivery_token = output.split()[0].split('=')[-1]
+        try:
+            output=subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            logger.error('to_outbox failed while delivering {} to {}'.format(hard_stage, supr_name_of_delivery))
+            logger.exception(e)
+        delivery_token = output.rstrip()
         return delivery_token
 
 
