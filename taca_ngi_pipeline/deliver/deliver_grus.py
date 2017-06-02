@@ -458,9 +458,6 @@ class GrusProjectDeliverer(ProjectDeliverer):
         password = self.config_statusdb.get('password')
         port     = self.config_statusdb.get('port')
         status_db_url = 'http://{}:{}@{}:{}'.format(username, password, url, port)
-        import pdb
-        pdb.set_trace()
-        
         status_db = couchdb.Server(status_db_url)
         projects_db = status_db['projects']
         view = projects_db.view('order_portal/ProjectID_to_PortalID')
@@ -474,23 +471,9 @@ class GrusProjectDeliverer(ProjectDeliverer):
         get_project_url = '{}/v1/order/{}'.format(self.orderportal.get('orderportal_api_url'), portal_id)
         headers = {'X-OrderPortal-API-key': '{}'.format(self.orderportal.get('orderportal_api_token'))}
         response = requests.get(get_project_url, headers=headers)
-        response.status_code  #this returns 200 perfect
-        json.dumps(response.json(), indent=2)
         if response.status_code != 200:
             raise AssertionError("Status code returned when trying to get PI email from project in order portal: {} was not 200. Response was: {}".format(portal_id, response.content))
-        import pdb
-        pdb.set_trace()
-        result = json.loads(response.content)
-        
-        #orderportal_db = status_db['orderportal_ngi']
-        #view = orderportal_db.view('taca/project_id_to_pi_email')
-        #rows = view[self.projectid].rows
-        #if len(rows) < 1:
-        #    raise AssertionError("Project {} not found in StatusDB: {}".format(self.projecid, url))
-        #if len(rows) > 1:
-        #    raise AssertionError('Project {} has more than one entry in orderportal_db'.format(self.projectid))
-        #
-        #pi_email = rows[0].value
+        pi_email = json.loads(response.content)['fields']['project_pi_email']
         return pi_email
 
 
