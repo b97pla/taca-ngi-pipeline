@@ -59,31 +59,31 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
 @click.pass_context
 @click.argument('projectid', type=click.STRING, nargs=-1)
 @click.option('--snic-api-credentials',
-			  default=None,
-			  envvar='SNIC_API_STOCKHOLM',
-			  type=click.File('r'),
-			  help='Path to SNIC-API credentials to create delivery projects')
+            default=None,
+            envvar='SNIC_API_STOCKHOLM',
+            type=click.File('r'),
+            help='Path to SNIC-API credentials to create delivery projects')
 @click.option('--statusdb-config',
-			  default=None,
-			  envvar='STATUS_DB_CONFIG',
-			  type=click.File('r'),
-			  help='Path to statusdb-configuration')
+            default=None,
+            envvar='STATUS_DB_CONFIG',
+            type=click.File('r'),
+            help='Path to statusdb-configuration')
 @click.option('--order-portal',
-			  default=None,
-			  envvar='ORDER_PORTAL',
-			  type=click.File('r'),
-			  help='Path to order portal credantials to retrive PI email')
+            default=None,
+            envvar='ORDER_PORTAL',
+            type=click.File('r'),
+            help='Path to order portal credantials to retrive PI email')
 @click.option('--pi-email',
-			  default=None,
-			  type=click.STRING,
-			  help='pi-email, to be specified if PI-email stored in statusdb does not correspond SUPR PI-email')
+            default=None,
+            type=click.STRING,
+            help='pi-email, to be specified if PI-email stored in statusdb does not correspond SUPR PI-email')
 @click.option('--sensitive/--no-sensitive',
-			  default = True,
-              help='flag to specify if data contained in the project is sensitive or not')
+            default = True,
+            help='flag to specify if data contained in the project is sensitive or not')
 @click.option('--hard-stage-only',
-              is_flag=True,
-              default = False,
-              help='Perform all the delivery actions but does not run to_mover (to be used for semi-manual deliveries)')
+            is_flag=True,
+            default = False,
+            help='Perform all the delivery actions but does not run to_mover (to be used for semi-manual deliveries)')
 
 def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, order_portal=None, pi_email=None, sensitive=True, hard_stage_only=False):
     """ Deliver the specified projects to the specified destination
