@@ -70,8 +70,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             raise AttributeError("snic confoguration is needed  delivering to GRUS (snic_api_url, snic_api_user, snic_api_password")
         self.config_statusdb = CONFIG.get('statusdb',None)
         if self.config_statusdb is None:
-            raise AttributeError("statusdc configuration is needed  delivering to GRUS (url, username, password, port")
-        self.orderportal = CONFIG.get('order_portal',None) # do not need to raise expection here, I have already checked for this and monitoring does not need it
+            raise AttributeError("statusdb configuration is needed  delivering to GRUS (url, username, password, port")
+        self.orderportal = CONFIG.get('order_portal',None) # do not need to raise exception here, I have already checked for this and monitoring does not need it
         self.pi_email  = pi_email
         self.sensitive = sensitive
         self.hard_stage_only = hard_stage_only
@@ -97,7 +97,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
         return 'NOT_DELIVERED' #last possible case is that the project is not delivered
 
     def check_mover_delivery_status(self):
-        """ This functions checks is project is under delivery. If so it waits until projects is delivered or a certain threshold is met
+        """ This function checks is project is under delivery. If so it waits until projects is delivered or a certain threshold is met
         """
         #first thing check that we are using mover 1.0.0
         if not check_mover_version():

@@ -82,7 +82,7 @@ def deliver(ctx, deliverypath, stagingpath, uppnexid, operator, stage_only, forc
               help='flag to specify if data contained in the project is sensitive or not')
 @click.option('--hard-stage-only',
               is_flag=True,
-			  default = False,
+              default = False,
               help='Perform all the delivery actions but does not run to_mover (to be used for semi-manual deliveries)')
 
 def project(ctx, projectid, snic_api_credentials=None, statusdb_config=None, order_portal=None, pi_email=None, sensitive=True, hard_stage_only=False):
