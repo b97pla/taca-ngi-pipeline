@@ -214,8 +214,8 @@ class GrusProjectDeliverer(ProjectDeliverer):
             logger.info("{} has already been delivered. This project will not be delivered again this time.".format(str(self)))
             return True
         elif self.get_delivery_status() == 'IN_PROGRESS':
-            logger.error("Project {} is already under delivery {}. No multiple mover deliveries are allowed".format(
-                    self.projectid, delivery_token))
+            logger.error("Project {} is already under delivery. No multiple mover deliveries are allowed".format(
+                    self.projectid))
             raise DelivererInterruptedError("Proejct already under delivery with Mover")
         elif self.get_delivery_status() == 'PARTIAL':
             logger.warning("{} has already been partially delivered. Please confirm you want to proceed.".format(str(self)))
