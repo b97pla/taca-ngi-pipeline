@@ -17,6 +17,7 @@ import subprocess
 from dateutil import parser
 import sys
 import re
+import shutil
 
 from ngi_pipeline.database.classes import CharonSession, CharonError
 from taca.utils.filesystem import do_copy, create_folder
@@ -279,7 +280,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
                 sample_deliverer = GrusSampleDeliverer(self.projectid, sample_id)
                 sample_deliverer.deliver_sample()
             except Exception, e:
-                logger.error('Sample {} has not been hard staged. Error says: {}'.format(sample_id, error))
+                logger.error('Sample {} has not been hard staged. Error says: {}'.format(sample_id, e))
                 logger.exception(e)
                 exit(1)
             else:
@@ -575,11 +576,14 @@ class GrusSampleDeliverer(SampleDeliverer):
         """
         logger.info("Creating hard copy of sample {}".format(self.sampleid))
         # join stage dir with sample dir
-        source = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
-        destination = os.path.join(self.expand_path(self.stagingpathhard), self.sampleid)
+        source_dir = os.path.join(self.expand_path(self.stagingpath), self.sampleid)
+        destination_dir = os.path.join(self.expand_path(self.stagingpathhard), self.sampleid)
         # destination must NOT exist
-        do_copy(source, destination)
-        logger.info("Sample {} has been hard staged to {}".format(self.sampleid, destination))
+        do_copy(source_dir, destination_dir)
+        #now copy md5 and other files
+        for file in glob.glob("{}.*".format(source_dir)):
+            shutil.copy(file, self.expand_path(self.stagingpathhard))
+        logger.info("Sample {} has been hard staged to {}".format(self.sampleid, destination_dir))
         return
 
 
