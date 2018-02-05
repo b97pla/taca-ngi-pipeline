@@ -218,6 +218,34 @@ class Deliverer(object):
                 "failed to stage delivery - reason: {}".format(e))
         return True
 
+    def do_delivery(self):
+        """ Deliver the staged delivery folder using rsync
+            :returns: True if delivery was successful, False if unsuccessful
+            :raises DelivererRsyncError: if an exception occurred during
+                transfer
+        """
+        agent = transfer.RsyncAgent(
+            self.expand_path(self.stagingpath),
+            dest_path=self.expand_path(self.deliverypath),
+            digestfile=self.delivered_digestfile(),
+            remote_host=getattr(self, 'remote_host', None),
+            remote_user=getattr(self, 'remote_user', None),
+            log=logger,
+            opts={
+                '--files-from': [self.staging_filelist()],
+                '--copy-links': None,
+                '--recursive': None,
+                '--perms': None,
+                '--chmod': 'ug+rwX,o-rwx',
+                '--verbose': None,
+                '--exclude': ["*rsync.out", "*rsync.err"]
+            })
+        create_folder(os.path.dirname(self.transfer_log()))
+        try:
+            return agent.transfer(transfer_log=self.transfer_log())
+        except transfer.TransferError as e:
+            raise DelivererRsyncError(e)
+
     def delivered_digestfile(self):
         """
             :returns: path to the file with checksums after delivery
@@ -416,6 +444,10 @@ class ProjectDeliverer(Deliverer):
                     db.dbcon(), self.projectid).get('samples', [])]:
                 st = SampleDeliverer(self.projectid, sampleid).deliver_sample()
                 status = (status and st)
+            # Atleast one sample should have been staged/delivered for the following steps
+            if os.path.exists(self.expand_path(self.stagingpath)):
+                # Try to deliver any miscellaneous files for the project (like reports, analysis)
+                ProjectMiscDeliverer(self.projectid).deliver_misc_data()
             # query the database whether all samples in the project have been sucessfully delivered
             if self.all_samples_delivered():
                 # this is the only delivery status we want to set on the project level, in order to avoid concurrently
@@ -457,6 +489,39 @@ class ProjectDeliverer(Deliverer):
                 if an error occurred when communicating with the database
         """
         return db.update_project(db.dbcon(), self.projectid, delivery_status=status)
+
+
+class ProjectMiscDeliverer(Deliverer):
+    """
+        A class for handling meta data for projects
+    """
+    def __init__(self, projectid=None, sampleid=None, **kwargs):
+        super(ProjectMiscDeliverer, self).__init__(
+            projectid,
+            sampleid,
+            **kwargs)
+        self.files_to_deliver = getattr(self, 'misc_files_to_deliver', None)
+
+    def staging_digestfile(self):
+        """
+            :returns: path to the file with checksums for miscellaneous files after staging
+        """
+        return self.expand_path(os.path.join(self.stagingpath, "miscellaneous.{}".format(self.hash_algorithm)))
+
+    def staging_filelist(self):
+        """
+            :returns: path to the file with a list of miscellaneous files to transfer after staging
+        """
+        return self.expand_path(os.path.join(self.stagingpath, "miscellaneous.lst"))
+
+    def deliver_misc_data(self):
+        if self.files_to_deliver != None:
+            if self.stage_delivery():
+                if not self.stage_only:
+                    if not self.do_delivery():
+                        raise DelivererError("Miscellaneous files for project {} was not properly delivered".format(self.projectid))
+            else:
+                logger.warning("Miscellaneous files were not properly staged for project {}".format(self.projectid))
 
 
 class SampleDeliverer(Deliverer):
@@ -603,34 +668,6 @@ class SampleDeliverer(Deliverer):
             self.update_delivery_status(status="FAILED")
             raise
 
-    def do_delivery(self):
-        """ Deliver the staged delivery folder using rsync
-            :returns: True if delivery was successful, False if unsuccessful
-            :raises DelivererRsyncError: if an exception occurred during
-                transfer
-        """
-        agent = transfer.RsyncAgent(
-            self.expand_path(self.stagingpath),
-            dest_path=self.expand_path(self.deliverypath),
-            digestfile=self.delivered_digestfile(),
-            remote_host=getattr(self, 'remote_host', None),
-            remote_user=getattr(self, 'remote_user', None),
-            log=logger,
-            opts={
-                '--files-from': [self.staging_filelist()],
-                '--copy-links': None,
-                '--recursive': None,
-                '--perms': None,
-                '--chmod': 'ug+rwX,o-rwx',
-                '--verbose': None,
-                '--exclude': ["*rsync.out", "*rsync.err"]
-            })
-        create_folder(os.path.dirname(self.transfer_log()))
-        try:
-            return agent.transfer(transfer_log=self.transfer_log())
-        except transfer.TransferError as e:
-            raise DelivererRsyncError(e)
-
     def update_delivery_status(self, status="DELIVERED"):
         """ Update the delivery_status field in the database to the supplied 
             status for the project and sample specified by this instance
@@ -639,9 +676,3 @@ class SampleDeliverer(Deliverer):
                 if an error occurred when communicating with the database
         """
         return db.update_sample(db.dbcon(), self.projectid, self.sampleid, delivery_status=status)
-
-
-
-
-
-
