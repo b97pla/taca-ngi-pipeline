@@ -265,19 +265,13 @@ class GrusProjectDeliverer(ProjectDeliverer):
         except Exception, e:
             logger.error("Cannot get samples from Charon. Error says: {}".format(str(e)))
             logger.exception(e)
-            exit(1)
+            raise e
         if len(samples_to_deliver) == 0:
             logger.warning('No staged samples found in Charon')
             raise AssertionError('No staged samples found in Charon')
 
         # collect other files (not samples) if any to include in the hard staging
-        misc_to_deliver = []
-        items_in_stagepath = os.listdir(soft_stagepath)
-        for itm in items_in_stagepath:
-            base_name, ext_format = os.path.splitext(itm)
-            if base_name in samples_to_deliver:
-                continue
-            misc_to_deliver.append(itm)
+        misc_to_deliver = [itm for itm in os.listdir(soft_stagepath) if os.path.splitext(itm)[0] not in samples_to_deliver]
 
         question = "\nProject stagepath: {}\nSamples: {}\nMiscellaneous: {}\n\nProceed with delivery ? "
         question = question.format(soft_stagepath, ", ".join(samples_to_deliver), ", ".join(misc_to_deliver))
@@ -295,7 +289,7 @@ class GrusProjectDeliverer(ProjectDeliverer):
             except Exception, e:
                 logger.error('Sample {} has not been hard staged. Error says: {}'.format(sample_id, e))
                 logger.exception(e)
-                exit(1)
+                raise e
             else:
                 hard_staged_samples.append(sample_id)
         if len(samples_to_deliver) != len(hard_staged_samples):
@@ -313,12 +307,11 @@ class GrusProjectDeliverer(ProjectDeliverer):
                     shutil.copytree(src_misc, dst_misc)
                 else:
                     shutil.copy(src_misc, dst_misc)
+                hard_staged_misc.append(itm)
             except Exception, e:
                 logger.error('Miscellaneous file {} has not been hard staged for project {}. Error says: {}'.format(itm, proj, e))
                 logger.exception(e)
-                exit(1)
-            else:
-                hard_staged_misc.append(itm)
+                raise e
         if len(misc_to_deliver) != len(hard_staged_misc):
             # Something unexpected happend, terminate
             logger.warning('Not all the Miscellaneous files have been hard staged for project {}. Terminating'.format(proj))

@@ -515,13 +515,16 @@ class ProjectMiscDeliverer(Deliverer):
         return self.expand_path(os.path.join(self.stagingpath, "miscellaneous.lst"))
 
     def deliver_misc_data(self):
-        if self.files_to_deliver != None:
-            if self.stage_delivery():
-                if not self.stage_only:
-                    if not self.do_delivery():
-                        raise DelivererError("Miscellaneous files for project {} was not properly delivered".format(self.projectid))
-            else:
-                logger.warning("Miscellaneous files were not properly staged for project {}".format(self.projectid))
+        if self.files_to_deliver == None:
+            logger.info("No miscellaneous files to deliver for project {}".format(self.projectid))
+            return False
+        if not self.stage_delivery():
+            logger.warning("Miscellaneous files were not properly staged for project {}".format(self.projectid))
+            return False
+        if not self.stage_only:
+            if not self.do_delivery():
+                raise DelivererError("Miscellaneous files for project {} was not properly delivered".format(self.projectid))
+        return True
 
 
 class SampleDeliverer(Deliverer):
