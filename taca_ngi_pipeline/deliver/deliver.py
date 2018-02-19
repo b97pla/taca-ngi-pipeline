@@ -235,6 +235,7 @@ class Deliverer(object):
                 '--files-from': [self.staging_filelist()],
                 '--copy-links': None,
                 '--recursive': None,
+                '--times': None,
                 '--perms': None,
                 '--chmod': 'ug+rwX,o-rwx',
                 '--verbose': None,

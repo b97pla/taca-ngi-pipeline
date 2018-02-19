@@ -10,6 +10,7 @@ import signal
 import taca_ngi_pipeline.utils.filesystem
 import tempfile
 import unittest
+import datetime
 
 from ngi_pipeline.database import classes as db
 from taca_ngi_pipeline.deliver import deliver
@@ -703,6 +704,44 @@ class TestSampleDeliverer(unittest.TestCase):
         observed = [os.path.relpath(os.path.join(d, f), destination)
                     for d, _, files in os.walk(destination) for f in files]
         self.assertItemsEqual(observed, expected)
+
+    def test_deliver_with_times(self):
+        """ stage and deliver files and assert that the modification times are preserved"""
+        # create some contents
+
+        def __get_mtime(starttime):
+            """ helper function to generate timestamps to be used on files """
+            for i in range(10):
+                yield ((starttime - datetime.datetime(1970, 1, 1)).total_seconds() + 3600*i)
+
+        datapath = self.deliverer.expand_path(self.deliverer.datapath)
+        source_file = os.path.join(datapath, "source_file")
+        source_dir = os.path.join(datapath, "source_dir")
+        source_times = __get_mtime(datetime.datetime(2018,1,1,7,6,34))
+        dir_times = (source_times.next(), source_times.next())
+        file_times = (source_times.next(), source_times.next())
+        os.mkdir(datapath)
+        os.mkdir(source_dir)
+        os.utime(source_dir, dir_times)
+        open(source_file, 'w').close()
+        os.utime(source_file, file_times)
+
+        stagingpath = self.deliverer.expand_path(self.deliverer.stagingpath)
+        dest_dir = os.path.join(stagingpath, os.path.basename(source_dir))
+        dest_file = os.path.join(stagingpath, os.path.basename(source_file))
+        deliverypath = self.deliverer.expand_path(self.deliverer.deliverypath)
+        os.mkdir(deliverypath)
+
+        with mock.patch.object(self.deliverer, "gather_files") as gather_files_mock:
+            gather_files_mock.return_value = ([source_file, dest_file, ""], [source_dir, dest_dir, None])
+            self.deliverer.stage_delivery()
+            self.deliverer.do_delivery()
+
+        dest_dir = os.path.join(deliverypath, os.path.basename(source_dir))
+        dest_file = os.path.join(deliverypath, os.path.basename(source_file))
+
+        self.assertEqual(dir_times[1], os.stat(dest_dir).st_mtime)
+        self.assertEqual(file_times[1], os.stat(dest_file).st_mtime)
 
     def test_acknowledge_sample_delivery(self):
         """ A sample delivery acknowledgement should be written to disk """
